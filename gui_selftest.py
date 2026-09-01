@@ -229,8 +229,9 @@ lt_bottom = app.look_text.winfo_rooty() + app.look_text.winfo_height()
 ok("the look box itself is on screen too",
    app.look_text.winfo_ismapped() and lt_bottom <= win_bottom,
    "look box bottom %d, window bottom %d" % (lt_bottom, win_bottom))
-ok("the side column scrolls, so the panels below it are reachable",
-   hasattr(app, "cast_side") and app.cast_side.sb.winfo_exists())
+tabs = [app.cast_side.tab(i, "text").strip() for i in range(app.cast_side.index("end"))]
+ok("the actor's panels are tabs, so none can be pushed off the window",
+   tabs == ["Look", "Reference face", "Who they are", "Voice", "Advanced"], str(tabs))
 
 # --- the edit-what-the-AI-wrote box ---
 app.project["characters"]["MAYA"]["one_line"] = "A reformed tech genius hiding in the shadows."
@@ -257,11 +258,33 @@ ok("clearing the box does not erase the character description",
 
 wbtn = named(app.tab_cast, "Save and describe their role")
 ok("there is a Save and describe their role button", len(wbtn) == 1, str(len(wbtn)))
+
+
+def on_screen_in_tab(widget, label):
+    """Select the tab this control lives on, then check it is really visible."""
+    for i in range(app.cast_side.index("end")):
+        page = app.nametowidget(app.cast_side.tabs()[i])
+        w = widget
+        while w is not None:
+            if str(w) == str(page):
+                app.cast_side.select(i)
+                root.update()
+                bottom = widget.winfo_rooty() + widget.winfo_height()
+                return (widget.winfo_ismapped()
+                        and bottom <= root.winfo_rooty() + root.winfo_height())
+            w = w.master
+    return False
+
+
 if wbtn:
-    b = wbtn[0]
-    ok("and it is on screen at the default window size",
-       b.winfo_ismapped()
-       and b.winfo_rooty() + b.winfo_height() <= root.winfo_rooty() + root.winfo_height())
+    ok("and it is on screen once its tab is chosen", on_screen_in_tab(wbtn[0], "who"))
+sl = named(app.tab_cast, "Save the look")
+if sl:
+    ok("the look controls are on screen on their tab", on_screen_in_tab(sl[0], "look"))
+pr = named(app.tab_cast, "Clear")
+if pr:
+    ok("the reference-face controls are on screen on their tab",
+       on_screen_in_tab(pr[0], "reference"))
 
 # --- no scores anywhere, and Find in script ---
 app.project["script"] = ("MAYA: You said the generator still worked.\n"

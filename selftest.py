@@ -9,6 +9,7 @@ turnarounds, voices, regeneration, and the movie cut.
 """
 
 import importlib.util
+import hashlib
 import json
 import math
 import os
@@ -246,6 +247,7 @@ def package_ns():
         comfy=__import__('scriptvoice.comfy',fromlist=['x']), RegenerateJob=pipeline.RegenerateJob, MovieJob=pipeline.MovieJob,
         StoryboardJob=pipeline.StoryboardJob, plan_shots_batched=pipeline.plan_shots_batched,
         stable_voice_seed=pipeline.stable_voice_seed, make_llm=pipeline.make_llm,
+        pipeline=pipeline, jobs=__import__('scriptvoice.jobs', fromlist=['x']),
         widgets=widgets)
 
 
@@ -262,7 +264,8 @@ def single_ns():
         visuals=m, movie=m, runtime=m, speech=m, render_mod=m, RenderJob=m.RenderJob, CastJob=m.CastJob,
         comfy=m, RegenerateJob=m.RegenerateJob, MovieJob=m.MovieJob,
         StoryboardJob=m.StoryboardJob, plan_shots_batched=m.plan_shots_batched,
-        stable_voice_seed=m.stable_voice_seed, make_llm=m.make_llm, widgets=m)
+        stable_voice_seed=m.stable_voice_seed, make_llm=m.make_llm,
+        pipeline=m, jobs=m, widgets=m)
 
 
 # --------------------------------------------------------------------- harness
@@ -1267,6 +1270,106 @@ def suite(sv, check):
                 or (stale_p["shots"].get(str(i)) or {}).get("scene") != heads[i]]
     check("recording the scene makes that shot stale, so it is drawn again",
           0 in todo_new, str(todo_new))
+
+    # ------------------------------------------- keeping one face across shots
+    check.section("[5j] locking a character's identity")
+    ii = sv.visuals.identity_image
+    port = os.path.join(work, "id_portrait.png")
+    spin0 = os.path.join(work, "id_spin.png")
+    mine = os.path.join(work, "id_mine.png")
+    for f in (port, spin0, mine):
+        make_png(f)
+    check("with nothing rendered there is nothing to lock onto",
+          ii(sv.project.new_character("X")) == "")
+    check("a drawn portrait is used when there is one",
+          ii({"portrait": port}) == port)
+    check("a turnaround frame will do if there is no portrait",
+          ii({"turnaround": [spin0]}) == spin0)
+    check("the user's own picture beats anything generated",
+          ii({"reference_image": mine, "portrait": port,
+              "turnaround": [spin0]}) == mine)
+    check("a reference that has been moved or deleted is skipped, not passed on",
+          ii({"reference_image": os.path.join(work, "gone.png"),
+              "portrait": port}) == port)
+
+    # The real bug: the storyboard and the movie built their shots separately,
+    # and only the movie passed a reference image.
+    calls = []
+    real_run = sv.jobs.SlotRunner.run
+
+    def spy_run(self, values, dest, kinds, **kw):
+        calls.append(dict(values))
+        return real_run(self, values, dest, kinds, **kw)
+
+    idp = json.loads(json.dumps(p))
+    idp["characters"]["MAYA"]["reference_image"] = mine
+    # The example workflow has no reference input, so give the shot slot one -
+    # otherwise this only proves the code correctly does nothing.
+    shot_map = idp["workflows"]["shot"]["mapping"]
+    # 4.ckpt_name is a real string input on this graph; what it drives does
+    # not matter here, only that a reference reaches the workflow at all.
+    shot_map["image"] = shot_map.get("image") or "4.ckpt_name"
+    idcues = sv.script_parser.parse("MAYA: One line only." + chr(10))
+    sv.jobs.SlotRunner.run = spy_run
+    try:
+        board = sv.StoryboardJob(idp, idcues, os.path.join(work, "idboard"),
+                                 lambda e: None)
+        run_job(board, timeout=90)
+        check("the storyboard renders", board.error is None, board.error or "")
+        board_calls = [c for c in calls if "prompt" in c]
+        check("the storyboard passes a reference image, as the movie always did",
+              board_calls and "image" in board_calls[-1],
+              str(sorted(board_calls[-1])) if board_calls else "no calls")
+    finally:
+        sv.jobs.SlotRunner.run = real_run
+
+    # one path, so the picture you judge is the picture that gets filmed
+    class _R(object):
+        def __init__(self, has_image=True):
+            self._has = has_image
+            self.uploaded = []
+
+        def has(self, key):
+            return key == "image" and self._has
+
+        def upload(self, path):
+            self.uploaded.append(path)
+            return "uploaded_" + os.path.basename(path)
+
+    amap2 = {"MAYA": dict(sv.project.new_character("MAYA"),
+                          appearance="short dark hair", portrait=port),
+             "RUBEN": dict(sv.project.new_character("RUBEN"),
+                           appearance="a burn scar", portrait=spin0)}
+    cue2 = sv.script_parser.parse("MAYA: Where were you?" + chr(10))[0]
+    r_ok = _R(True)
+    vals, prompt2, seed2, subj2, ref2 = sv.pipeline.shot_values(
+        r_ok, amap2, cue2, {"shot": "medium shot"}, 3)
+    check("a shot is conditioned on the speaker's own face",
+          vals.get("image") == "uploaded_id_portrait.png", str(vals.get("image")))
+    check("and the seed follows that same character",
+          seed2 == int(amap2["MAYA"]["look_seed"]) + 3)
+
+    react = {"shot": "close-up of RUBEN listening"}
+    vals_r, _, seed_r, subj_r, _ = sv.pipeline.shot_values(_R(True), amap2, cue2, react, 3)
+    check("a reaction shot is conditioned on the listener, not the speaker",
+          subj_r == "RUBEN" and vals_r.get("image") == "uploaded_id_spin.png",
+          "%s %s" % (subj_r, vals_r.get("image")))
+    check("and takes the listener's seed too",
+          seed_r == int(amap2["RUBEN"]["look_seed"]) + 3)
+
+    r_no = _R(False)
+    vals_n, _, _, _, ref_n = sv.pipeline.shot_values(
+        r_no, amap2, cue2, {"shot": "medium shot"}, 3)
+    check("a workflow with no image input still renders, just without the lock",
+          "image" not in vals_n and ref_n == "" and r_no.uploaded == [],
+          str(sorted(vals_n)))
+
+    # changing the reference must redraw, not re-use the old picture
+    key_of = lambda pr, sd, tx, rf: hashlib.sha1(
+        ("%s|%d|%s|%s" % (pr, sd, tx, rf)).encode("utf-8")).hexdigest()[:16]
+    check("swapping the reference face makes the shot stale",
+          key_of(prompt2, seed2, cue2.text, port)
+          != key_of(prompt2, seed2, cue2.text, mine))
 
     # --------------------------------------------------------- regeneration
     check.section("[6] the regenerate buttons")

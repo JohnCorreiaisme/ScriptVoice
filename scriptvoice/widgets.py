@@ -319,6 +319,8 @@ class ActorCard(ttk.Frame):
             marks.append("portrait")
         if actor.get("turnaround"):
             marks.append("%d-frame spin" % len(actor["turnaround"]))
+        if actor.get("reference_image"):
+            marks.append("your reference picture")
         if actor.get("voice_sample"):
             marks.append("voice sample")
         lines.append("Files: %s" % (", ".join(marks) if marks else "none yet"))

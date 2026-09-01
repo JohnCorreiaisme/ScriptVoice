@@ -171,6 +171,9 @@ def new_character(name):
         "lead": False,          # "Main character" - a tick box, not a guess
         "script_role": "",      # what they actually do in the script, in a sentence
         "aliases": [],          # other script names that are really this person
+        # A picture of this character to condition every render on. Yours if you
+        # set one, otherwise the portrait the program drew.
+        "reference_image": "",
         "look_note": "",        # words that go straight into the image prompt
         "one_line": "",
         "age_range": "",

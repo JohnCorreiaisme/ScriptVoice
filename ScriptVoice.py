@@ -2189,6 +2189,9 @@ def new_character(name):
         "lead": False,          # "Main character" - a tick box, not a guess
         "script_role": "",      # what they actually do in the script, in a sentence
         "aliases": [],          # other script names that are really this person
+        # A picture of this character to condition every render on. Yours if you
+        # set one, otherwise the portrait the program drew.
+        "reference_image": "",
         "look_note": "",        # words that go straight into the image prompt
         "one_line": "",
         "age_range": "",
@@ -2732,6 +2735,21 @@ def actor_dir(out_dir, name):
     d = os.path.join(out_dir, "cast", slug(name))
     os.makedirs(d, exist_ok=True)
     return d
+
+
+def identity_image(actor):
+    """The picture that says who this character is, or "".
+
+    A reference the user chose wins over anything generated - it is the whole
+    point of setting one. Otherwise the locked portrait, and failing that the
+    first turnaround frame, which is the same face from the front.
+    """
+    for path in (actor.get("reference_image", ""),
+                 actor.get("portrait", ""),
+                 (actor.get("turnaround") or [""])[0]):
+        if path and os.path.exists(path):
+            return path
+    return ""
 
 
 def render_portrait(runner, actor, out_dir, cancel=None):
@@ -3441,7 +3459,7 @@ class _VisualMixin(object):
 
         files = visuals.render_turnaround(
             runner, actor, self.out_dir, frames=frames, cancel=self.cancelled,
-            on_frame=on_frame, reference=actor.get("portrait", ""))
+            on_frame=on_frame, reference=visuals.identity_image(actor))
         actor["turnaround"] = files
         gif = visuals.make_gif(
             files, os.path.join(visuals.actor_dir(self.out_dir, actor["name"]), "spin.gif"))
@@ -3727,6 +3745,24 @@ class RegenerateJob(Worker, _VisualMixin, _GpuMixin):
         self.result = {"name": actor["name"], "what": self.what}
 
 
+def shot_values(runner, actor_map, cue, shot, index):
+    """Everything one storyboard/movie shot is rendered from.
+
+    The storyboard and the movie used to build this separately, and they had
+    drifted: only the movie passed a reference image, so the pictures being
+    judged were not the pictures being filmed. One function, both callers.
+    """
+    prompt = casting.shot_prompt(actor_map, cue, shot)
+    subject = casting.shot_subject(shot, cue, actor_map.keys())
+    actor = actor_map.get(subject) or {}
+    seed = int(actor.get("look_seed", 0)) + index
+    values = {"prompt": prompt, "negative": casting.NEGATIVE, "seed": seed}
+    ref = visuals.identity_image(actor) if runner.has("image") else ""
+    if ref:
+        values["image"] = runner.upload(ref)
+    return values, prompt, seed, subject, ref
+
+
 SHOT_BATCH = 20
 
 
@@ -3816,6 +3852,10 @@ class StoryboardJob(Worker, _VisualMixin, _GpuMixin):
         self.free_for_drawing()
         client = self._client()
         runner = self._runner(client, "shot", required=True)
+        if not runner.has("image"):
+            self.log("This shot workflow has no reference-image input, so every shot "
+                     "is drawn from words alone and characters will drift. Load a "
+                     "workflow with an IPAdapter or reference input to lock them.")
         shots = p.get("shots") or {}
         actor_map = {a["name"]: a for a in proj.cast(p)}
         shot_dir = os.path.join(self.out_dir, "shots")
@@ -3830,13 +3870,9 @@ class StoryboardJob(Worker, _VisualMixin, _GpuMixin):
                 raise ComfyError("Cancelled")
             cue = self.cues[i]
             shot = shots.get(str(i)) or {}
-            prompt = casting.shot_prompt(actor_map, cue, shot)
-            # The seed follows the face in frame, so a character keeps their
-            # look whether they are speaking or being looked at.
-            subject = casting.shot_subject(shot, cue, actor_map.keys())
-            actor = actor_map.get(subject) or {}
-            seed = int(actor.get("look_seed", 0)) + i
-            key = hashlib.sha1(("%s|%d|%s" % (prompt, seed, cue.text))
+            values, prompt, seed, subject, ref = shot_values(
+                runner, actor_map, cue, shot, i)
+            key = hashlib.sha1(("%s|%d|%s|%s" % (prompt, seed, cue.text, ref))
                                .encode("utf-8")).hexdigest()[:16]
             prev = manifest.get(str(i))
             self.step("Drawing shot %d of %d" % (n + 1, len(targets)), n, len(targets))
@@ -3846,9 +3882,8 @@ class StoryboardJob(Worker, _VisualMixin, _GpuMixin):
                           cached=True, prompt=prompt)
                 continue
             if self.only is not None:
-                seed += random.randint(1, 10 ** 6)      # a redraw should differ
-            path = runner.run({"prompt": prompt, "negative": casting.NEGATIVE, "seed": seed},
-                              os.path.join(shot_dir, "%04d" % (i + 1)), IMAGE,
+                values["seed"] = seed + random.randint(1, 10 ** 6)   # a redraw differs
+            path = runner.run(values, os.path.join(shot_dir, "%04d" % (i + 1)), IMAGE,
                               cancel=self.cancelled)
             self.images[i] = path
             manifest[str(i)] = {"key": key, "file": path, "prompt": prompt}
@@ -3923,10 +3958,9 @@ class MovieJob(Worker, _VisualMixin, _GpuMixin):
                     if self.cancelled():
                         raise ComfyError("Cancelled")
                     shot = shots.get(str(i)) or {}
-                    prompt = casting.shot_prompt(actor_map, cue, shot)
-                    actor = actor_map.get(cue.speaker) or {}
-                    seed = int(actor.get("look_seed", 0)) + i
-                    key = hashlib.sha1(("%s|%d|%s" % (prompt, seed, cue.text))
+                    values, prompt, seed, subject, ref = shot_values(
+                        runner, actor_map, cue, shot, i)
+                    key = hashlib.sha1(("%s|%d|%s|%s" % (prompt, seed, cue.text, ref))
                                        .encode("utf-8")).hexdigest()[:16]
                     prev = manifest.get(str(i))
                     self.step("Shot %d of %d" % (i + 1, len(self.cues)), i, len(self.cues))
@@ -3936,9 +3970,6 @@ class MovieJob(Worker, _VisualMixin, _GpuMixin):
                         self.emit("shot_done", index=i, total=len(self.cues),
                                   file=prev["file"], cached=True)
                         continue
-                    values = {"prompt": prompt, "negative": casting.NEGATIVE, "seed": seed}
-                    if runner.has("image") and actor.get("portrait"):
-                        values["image"] = runner.upload(actor["portrait"])
                     path = runner.run(values, os.path.join(shot_dir, "%04d" % (i + 1)),
                                       IMAGE, cancel=self.cancelled)
                     images[i] = path
@@ -4325,6 +4356,8 @@ class ActorCard(ttk.Frame):
             marks.append("portrait")
         if actor.get("turnaround"):
             marks.append("%d-frame spin" % len(actor["turnaround"]))
+        if actor.get("reference_image"):
+            marks.append("your reference picture")
         if actor.get("voice_sample"):
             marks.append("voice sample")
         lines.append("Files: %s" % (", ".join(marks) if marks else "none yet"))
@@ -4359,7 +4392,7 @@ import webbrowser
 from tkinter import filedialog, messagebox, ttk
 
 # (flattened) from . import casting, llm as llm_mod, movie as movie_mod, project as proj
-# (flattened) from . import script_parser, speech
+# (flattened) from . import script_parser, speech, visuals
 # (flattened) from . import comfy as comfy_mod
 # (flattened) from .comfy import ComfyClient, ComfyError
 # (flattened) from .pipeline import CastJob, MovieJob, RegenerateJob, StoryboardJob
@@ -4566,15 +4599,16 @@ class App(ttk.Frame):
         # This column holds the turnaround, the voice panel, the look box and the
         # workflow overrides - together taller than most windows, so it scrolls.
         right_outer = ttk.Frame(panes, padding=(10, 0, 0, 0))
-        self.cast_side = ScrollFrame(right_outer)
-        self.cast_side.pack(fill="both", expand=True)
-        right = self.cast_side.body
-        self.spin = SpinViewer(right)
+        self.spin = SpinViewer(right_outer, size=(300, 330))
         self.spin.pack(anchor="n")
+        # Everything about the selected actor, one click apart. Stacking these
+        # pushed the lower ones off the bottom of the window as they grew.
+        self.cast_side = ttk.Notebook(right_outer)
+        self.cast_side.pack(fill="both", expand=True, pady=(8, 0))
+        right = right_outer
 
-        lbox = ttk.LabelFrame(right, text="The look you want (goes straight to the picture)",
-                              padding=8)
-        lbox.pack(fill="x", pady=(10, 0))
+        lbox = ttk.Frame(self.cast_side, padding=8)
+        self.cast_side.add(lbox, text="  Look  ")
         self.look_text = tk.Text(lbox, height=3, wrap="word", font=("Segoe UI", 9))
         self.look_text.pack(fill="x")
         ttk.Label(lbox, foreground="#666",
@@ -4587,9 +4621,22 @@ class App(ttk.Frame):
         ttk.Button(lrow, text="Save and redraw",
                    command=self.save_look_and_redraw).pack(side="left", padx=6)
 
-        wbox = ttk.LabelFrame(right, text="Who they are (edit anything the AI got wrong)",
-                              padding=8)
-        wbox.pack(fill="x", pady=(10, 0))
+        rbox = ttk.Frame(self.cast_side, padding=8)
+        self.cast_side.add(rbox, text="  Reference face  ")
+        rrow = ttk.Frame(rbox)
+        rrow.pack(fill="x")
+        self.v_reference = tk.StringVar()
+        ttk.Entry(rrow, textvariable=self.v_reference).pack(side="left", fill="x", expand=True)
+        ttk.Button(rrow, text="...", width=3,
+                   command=self.pick_reference).pack(side="left", padx=4)
+        ttk.Button(rrow, text="Clear", width=6,
+                   command=self.clear_reference).pack(side="left")
+        self.v_reference_note = tk.StringVar(value="")
+        ttk.Label(rbox, textvariable=self.v_reference_note, foreground="#666",
+                  wraplength=360, justify="left").pack(anchor="w", pady=(4, 0))
+
+        wbox = ttk.Frame(self.cast_side, padding=8)
+        self.cast_side.add(wbox, text="  Who they are  ")
         self.who_text = tk.Text(wbox, height=3, wrap="word", font=("Segoe UI", 9))
         self.who_text.pack(fill="x")
         ttk.Label(wbox, foreground="#666",
@@ -4604,8 +4651,8 @@ class App(ttk.Frame):
         ttk.Button(wrow, text="Split off a name...",
                    command=self.split_character).pack(side="left", padx=6)
 
-        vbox = ttk.LabelFrame(right, text="Voice details for the selected actor", padding=8)
-        vbox.pack(fill="x", pady=(10, 0))
+        vbox = ttk.Frame(self.cast_side, padding=8)
+        self.cast_side.add(vbox, text="  Voice  ")
         vbox.columnconfigure(1, weight=1)
         self.v_sel_name = tk.StringVar(value="(none selected)")
         ttk.Label(vbox, textvariable=self.v_sel_name,
@@ -4648,8 +4695,8 @@ class App(ttk.Frame):
         ttk.Button(brow, text="Save", command=self.save_voice_details).pack(side="left")
         ttk.Button(brow, text="Hear it", command=self.preview_system_voice).pack(side="left", padx=6)
 
-        pbox = ttk.LabelFrame(right, text="Workflow overrides for this actor", padding=8)
-        pbox.pack(fill="x", pady=(10, 0))
+        pbox = ttk.Frame(self.cast_side, padding=8)
+        self.cast_side.add(pbox, text="  Advanced  ")
         self.param_tree = ttk.Treeview(pbox, columns=("value",), show="tree headings", height=4)
         self.param_tree.heading("#0", text="Input")
         self.param_tree.heading("value", text="Value")
@@ -5230,6 +5277,10 @@ class App(ttk.Frame):
                 if typed != (actor.get("look_note") or ""):
                     actor["look_note"] = typed
                     self.dirty = True
+                ref = self.v_reference.get().strip()
+                if ref != (actor.get("reference_image") or ""):
+                    actor["reference_image"] = ref
+                    self.dirty = True
                 written = self.who_text.get("1.0", "end-1c").strip()
                 if written and written != (actor.get("one_line") or ""):
                     actor["one_line"] = written
@@ -5621,6 +5672,37 @@ class App(ttk.Frame):
         self.set_status("%s: %d line%s, first at line %d. Highlighted in the script."
                         % (name, len(places), "" if len(places) == 1 else "s", first))
 
+    def pick_reference(self):
+        """Choose your own picture of this character for every render."""
+        name = self.selected_actor
+        actor = (self.project.get("characters") or {}).get(name)
+        if not actor:
+            messagebox.showinfo(APP, "Select an actor first.")
+            return
+        path = filedialog.askopenfilename(
+            title="Reference picture for %s" % name,
+            filetypes=[("Images", "*.png *.jpg *.jpeg *.webp *.bmp"), ("All files", "*.*")])
+        if not path:
+            return
+        actor["reference_image"] = path
+        self.v_reference.set(path)
+        self.dirty = True
+        self._refresh_cast()
+        self.select_actor(name)
+        self.set_status("%s will be drawn from %s." % (name, os.path.basename(path)))
+
+    def clear_reference(self):
+        """Go back to the portrait the program drew."""
+        name = self.selected_actor
+        actor = (self.project.get("characters") or {}).get(name)
+        if not actor:
+            return
+        actor["reference_image"] = ""
+        self.v_reference.set("")
+        self.dirty = True
+        self.select_actor(name)
+        self.set_status("%s is back to the drawn portrait." % name)
+
     def save_who(self):
         """Store the user's own words about who this character is."""
         if not self.selected_actor:
@@ -5660,6 +5742,17 @@ class App(ttk.Frame):
         self.look_text.insert("1.0", actor.get("look_note", ""))
         self.who_text.delete("1.0", "end")
         self.who_text.insert("1.0", actor.get("one_line", ""))
+        self.v_reference.set(actor.get("reference_image", ""))
+        using = visuals.identity_image(actor)
+        if actor.get("reference_image"):
+            self.v_reference_note.set("Your own picture. Every shot of %s is drawn "
+                                      "from it." % name)
+        elif using:
+            self.v_reference_note.set("Using the portrait the program drew. Choose your "
+                                      "own picture to override it.")
+        else:
+            self.v_reference_note.set("Nothing to lock onto yet - press New look, or "
+                                      "choose a picture of your own.")
         frames = list(actor.get("turnaround") or [])
         if not frames and actor.get("portrait"):
             frames = [actor["portrait"]]
@@ -5883,6 +5976,10 @@ class App(ttk.Frame):
                                           (" (%s added to the cast)" % ", ".join(unknown))
                                           if unknown else ""))
         self.dirty = True
+        # Remember what was parsed, so moving between tabs does not re-parse an
+        # unchanged script. This was never set, so every visit to Cast or
+        # Storyboard re-read the whole script and rebuilt every list.
+        self._last_compiled = self.project["script"]
         return self.cues
 
     # ----------------------------------------------------------------- render

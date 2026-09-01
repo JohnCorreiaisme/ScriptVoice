@@ -112,7 +112,7 @@ class _VisualMixin(object):
 
         files = visuals.render_turnaround(
             runner, actor, self.out_dir, frames=frames, cancel=self.cancelled,
-            on_frame=on_frame, reference=actor.get("portrait", ""))
+            on_frame=on_frame, reference=visuals.identity_image(actor))
         actor["turnaround"] = files
         gif = visuals.make_gif(
             files, os.path.join(visuals.actor_dir(self.out_dir, actor["name"]), "spin.gif"))
@@ -398,6 +398,24 @@ class RegenerateJob(Worker, _VisualMixin, _GpuMixin):
         self.result = {"name": actor["name"], "what": self.what}
 
 
+def shot_values(runner, actor_map, cue, shot, index):
+    """Everything one storyboard/movie shot is rendered from.
+
+    The storyboard and the movie used to build this separately, and they had
+    drifted: only the movie passed a reference image, so the pictures being
+    judged were not the pictures being filmed. One function, both callers.
+    """
+    prompt = casting.shot_prompt(actor_map, cue, shot)
+    subject = casting.shot_subject(shot, cue, actor_map.keys())
+    actor = actor_map.get(subject) or {}
+    seed = int(actor.get("look_seed", 0)) + index
+    values = {"prompt": prompt, "negative": casting.NEGATIVE, "seed": seed}
+    ref = visuals.identity_image(actor) if runner.has("image") else ""
+    if ref:
+        values["image"] = runner.upload(ref)
+    return values, prompt, seed, subject, ref
+
+
 SHOT_BATCH = 20
 
 
@@ -487,6 +505,10 @@ class StoryboardJob(Worker, _VisualMixin, _GpuMixin):
         self.free_for_drawing()
         client = self._client()
         runner = self._runner(client, "shot", required=True)
+        if not runner.has("image"):
+            self.log("This shot workflow has no reference-image input, so every shot "
+                     "is drawn from words alone and characters will drift. Load a "
+                     "workflow with an IPAdapter or reference input to lock them.")
         shots = p.get("shots") or {}
         actor_map = {a["name"]: a for a in proj.cast(p)}
         shot_dir = os.path.join(self.out_dir, "shots")
@@ -501,13 +523,9 @@ class StoryboardJob(Worker, _VisualMixin, _GpuMixin):
                 raise ComfyError("Cancelled")
             cue = self.cues[i]
             shot = shots.get(str(i)) or {}
-            prompt = casting.shot_prompt(actor_map, cue, shot)
-            # The seed follows the face in frame, so a character keeps their
-            # look whether they are speaking or being looked at.
-            subject = casting.shot_subject(shot, cue, actor_map.keys())
-            actor = actor_map.get(subject) or {}
-            seed = int(actor.get("look_seed", 0)) + i
-            key = hashlib.sha1(("%s|%d|%s" % (prompt, seed, cue.text))
+            values, prompt, seed, subject, ref = shot_values(
+                runner, actor_map, cue, shot, i)
+            key = hashlib.sha1(("%s|%d|%s|%s" % (prompt, seed, cue.text, ref))
                                .encode("utf-8")).hexdigest()[:16]
             prev = manifest.get(str(i))
             self.step("Drawing shot %d of %d" % (n + 1, len(targets)), n, len(targets))
@@ -517,9 +535,8 @@ class StoryboardJob(Worker, _VisualMixin, _GpuMixin):
                           cached=True, prompt=prompt)
                 continue
             if self.only is not None:
-                seed += random.randint(1, 10 ** 6)      # a redraw should differ
-            path = runner.run({"prompt": prompt, "negative": casting.NEGATIVE, "seed": seed},
-                              os.path.join(shot_dir, "%04d" % (i + 1)), IMAGE,
+                values["seed"] = seed + random.randint(1, 10 ** 6)   # a redraw differs
+            path = runner.run(values, os.path.join(shot_dir, "%04d" % (i + 1)), IMAGE,
                               cancel=self.cancelled)
             self.images[i] = path
             manifest[str(i)] = {"key": key, "file": path, "prompt": prompt}
@@ -594,10 +611,9 @@ class MovieJob(Worker, _VisualMixin, _GpuMixin):
                     if self.cancelled():
                         raise ComfyError("Cancelled")
                     shot = shots.get(str(i)) or {}
-                    prompt = casting.shot_prompt(actor_map, cue, shot)
-                    actor = actor_map.get(cue.speaker) or {}
-                    seed = int(actor.get("look_seed", 0)) + i
-                    key = hashlib.sha1(("%s|%d|%s" % (prompt, seed, cue.text))
+                    values, prompt, seed, subject, ref = shot_values(
+                        runner, actor_map, cue, shot, i)
+                    key = hashlib.sha1(("%s|%d|%s|%s" % (prompt, seed, cue.text, ref))
                                        .encode("utf-8")).hexdigest()[:16]
                     prev = manifest.get(str(i))
                     self.step("Shot %d of %d" % (i + 1, len(self.cues)), i, len(self.cues))
@@ -607,9 +623,6 @@ class MovieJob(Worker, _VisualMixin, _GpuMixin):
                         self.emit("shot_done", index=i, total=len(self.cues),
                                   file=prev["file"], cached=True)
                         continue
-                    values = {"prompt": prompt, "negative": casting.NEGATIVE, "seed": seed}
-                    if runner.has("image") and actor.get("portrait"):
-                        values["image"] = runner.upload(actor["portrait"])
                     path = runner.run(values, os.path.join(shot_dir, "%04d" % (i + 1)),
                                       IMAGE, cancel=self.cancelled)
                     images[i] = path

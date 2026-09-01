@@ -24,6 +24,21 @@ def actor_dir(out_dir, name):
     return d
 
 
+def identity_image(actor):
+    """The picture that says who this character is, or "".
+
+    A reference the user chose wins over anything generated - it is the whole
+    point of setting one. Otherwise the locked portrait, and failing that the
+    first turnaround frame, which is the same face from the front.
+    """
+    for path in (actor.get("reference_image", ""),
+                 actor.get("portrait", ""),
+                 (actor.get("turnaround") or [""])[0]):
+        if path and os.path.exists(path):
+            return path
+    return ""
+
+
 def render_portrait(runner, actor, out_dir, cancel=None):
     """One locked portrait: same appearance words + same look seed every time."""
     d = actor_dir(out_dir, actor["name"])

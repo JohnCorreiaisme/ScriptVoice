@@ -29,12 +29,14 @@ Six tabs, in the order you'd actually work:
 2. **Script** — paste it, load a file, or have the AI write one. **Compile script** reads it and
    adds every speaker to the cast.
 3. **Cast** — one card per character: portrait, an 8-frame turnaround you can drag to spin, a
-   voice sample, and what they do in the script. You can override the look, rewrite the
-   description, mark the main character, merge two names that are the same person, and add or
-   remove characters by hand.
-4. **Storyboard** — one image per line of dialogue, using each character's locked appearance and
-   the script's own scene headings. Per shot you can choose whose face is in frame and write your
-   own shot description.
+   voice sample, and what they do in the script. Tabs beside it for the look you want, a
+   **reference face** every render is conditioned on, the description (editable — the AI reads it
+   back), the voice, and workflow overrides. You can mark the main character, merge two names that
+   are the same person, jump to their lines in the script, and add or remove characters by hand.
+4. **Storyboard** — one image per line of dialogue, drawn from the script's own scene headings,
+   scene-appropriate wardrobe, and the reference face of whoever is in frame — which is often the
+   listener, not the speaker. Per shot you can pick that face yourself and write your own shot
+   description; both survive a replan.
 5. **Movie** — records every line, cuts the stills against the audio, writes an `.mp4` and an EDL.
 6. **Setup** — ComfyUI address, workflow slots, voices, and *Free the GPU between steps*.
 
@@ -51,11 +53,11 @@ python run.py                # the scriptvoice/ package, for development
 
 ## What has actually been tested
 
-**Automated: 652 checks** (`python selftest.py`) — run twice, once against the package and once
+**Automated: 678 checks** (`python selftest.py`) — run twice, once against the package and once
 against the flattened single file, so the two cannot drift apart. They use a stub ComfyUI and a
 stub OpenAI-compatible model server, so they need no GPU and no network.
 
-**Interface: 54 checks** (`python gui_selftest.py`) — drives the real Tk window: that a control
+**Interface: 56 checks** (`python gui_selftest.py`) — drives the real Tk window: that a control
 exists, is wired to the right handler, and is on screen at the default window size.
 
 **On real hardware** — Windows 11, RTX 3060 12 GB, ComfyUI with SDXL-Turbo, LM Studio serving
@@ -87,8 +89,11 @@ while every metadata check passed.
 
 ### Not done
 
-- **Character consistency is a fixed seed plus fixed words, not an identity lock.** No IPAdapter,
-  no LoRA. People drift between shots.
+- **Character consistency needs a workflow that can use it.** Every shot is now conditioned on
+  the character's reference face - yours if you set one, otherwise the drawn portrait - and the
+  seed follows the face in frame rather than the speaker. But that only bites if your shot
+  workflow has a reference-image input (IPAdapter, InstantID, PuLID). With a plain text-to-image
+  graph the app says so in the log and characters still drift.
 - **The turnaround is 8 separate renders, not a real 3D spin.** Angles are prompted, not modelled.
 - **The film is stills cut against audio.** No motion, no camera moves.
 - **No continuity between shots** beyond the scene heading — no eyelines, no consistent geography.
@@ -117,8 +122,8 @@ Nothing else. No accounts, no keys, no network calls beyond `127.0.0.1`.
 ScriptVoice.py      the whole program in one file (generated)
 build_single.py     flattens scriptvoice/ into it; refuses to build on a name collision
 run.py              runs the package
-selftest.py         652 checks, against both the package and the single file
-gui_selftest.py     54 widget checks against the real window
+selftest.py         678 checks, against both the package and the single file
+gui_selftest.py     56 widget checks against the real window
 scriptvoice/        audio, comfy, casting, llm, movie, pipeline, project, render,
                     script_parser, speech, visuals, widgets, worker, gui
 workflows/          example API-format ComfyUI workflows

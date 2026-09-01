@@ -128,4 +128,7 @@ Your projects, scripts and renders are written to an output folder you choose, a
 
 ## Licence
 
-None chosen yet. All rights reserved for now; ask if you want to use it.
+[MIT](LICENSE). Use it, change it, ship it - just keep the copyright notice.
+
+The licence covers this software only. Anything you make with it - your script, your cast, your
+renders, your film - is yours, and none of it is in this repository.

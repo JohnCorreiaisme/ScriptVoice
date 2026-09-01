@@ -1,0 +1,25 @@
+{
+  "1": {
+    "class_type": "LoadAudio",
+    "inputs": {"audio": "reference.wav"},
+    "_meta": {"title": "Reference voice"}
+  },
+  "2": {
+    "class_type": "DemoTTS",
+    "inputs": {
+      "text": "Replace me with a line of dialogue.",
+      "reference_audio": ["1", 0],
+      "speaker": "default",
+      "exaggeration": 0.5,
+      "speed": 1.0,
+      "temperature": 0.8,
+      "seed": 0
+    },
+    "_meta": {"title": "Text to speech"}
+  },
+  "3": {
+    "class_type": "SaveAudio",
+    "inputs": {"audio": ["2", 0], "filename_prefix": "scriptvoice"},
+    "_meta": {"title": "Save"}
+  }
+}

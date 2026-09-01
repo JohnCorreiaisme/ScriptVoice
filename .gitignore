@@ -1,0 +1,36 @@
+# Everything a run produces. This is where your script, your cast bible, your
+# rendered shots, your audio and your finished film live - none of it belongs
+# in a public repository.
+output/
+*.svproj
+*.svproj.bak
+
+# Rendered media, wherever it lands
+*.mp4
+*.wav
+*.gif
+*.png
+*.jpg
+*.jpeg
+!workflows/*.png
+
+# Scripts and documents you feed it
+*.odt
+*.docx
+*.fdx
+*.fountain
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
+.DS_Store

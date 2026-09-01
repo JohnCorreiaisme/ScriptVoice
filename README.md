@@ -1,4 +1,7 @@
+
 # ScriptVoice
+Human generated text: Upload a script or put an idea in the description and the Ai will build you a script. Choose Characters to use in the story and add their details. A story board is automatically created. And then a movie is generated from that with the characters you choose. :End Human generated text.
+
 
 An offline film studio for a local ComfyUI. Give it a script; it works out the cast, draws each
 character, gives them a voice, storyboards every line, and cuts the result into a movie file.

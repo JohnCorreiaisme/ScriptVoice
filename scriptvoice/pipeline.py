@@ -95,7 +95,9 @@ class _VisualMixin(object):
 
     def render_portrait(self, runner, actor):
         self.progress(actor["name"], "Drawing the portrait...")
-        path = visuals.render_portrait(runner, actor, self.out_dir, cancel=self.cancelled)
+        path = visuals.render_portrait(
+            runner, actor, self.out_dir, cancel=self.cancelled,
+            prefix=(self.project.get("options") or {}).get("prompt_prefix", ""))
         actor["portrait"] = path
         self.emit("asset", name=actor["name"], asset="portrait", path=path)
         return path
@@ -112,7 +114,8 @@ class _VisualMixin(object):
 
         files = visuals.render_turnaround(
             runner, actor, self.out_dir, frames=frames, cancel=self.cancelled,
-            on_frame=on_frame, reference=visuals.identity_image(actor))
+            on_frame=on_frame, reference=visuals.identity_image(actor),
+            prefix=(self.project.get("options") or {}).get("prompt_prefix", ""))
         actor["turnaround"] = files
         gif = visuals.make_gif(
             files, os.path.join(visuals.actor_dir(self.out_dir, actor["name"]), "spin.gif"))
@@ -398,14 +401,14 @@ class RegenerateJob(Worker, _VisualMixin, _GpuMixin):
         self.result = {"name": actor["name"], "what": self.what}
 
 
-def shot_values(runner, actor_map, cue, shot, index):
+def shot_values(runner, actor_map, cue, shot, index, prefix=""):
     """Everything one storyboard/movie shot is rendered from.
 
     The storyboard and the movie used to build this separately, and they had
     drifted: only the movie passed a reference image, so the pictures being
     judged were not the pictures being filmed. One function, both callers.
     """
-    prompt = casting.shot_prompt(actor_map, cue, shot)
+    prompt = casting.shot_prompt(actor_map, cue, shot, prefix=prefix)
     subject = casting.shot_subject(shot, cue, actor_map.keys())
     actor = actor_map.get(subject) or {}
     seed = int(actor.get("look_seed", 0)) + index
@@ -524,7 +527,7 @@ class StoryboardJob(Worker, _VisualMixin, _GpuMixin):
             cue = self.cues[i]
             shot = shots.get(str(i)) or {}
             values, prompt, seed, subject, ref = shot_values(
-                runner, actor_map, cue, shot, i)
+                runner, actor_map, cue, shot, i, opts.get("prompt_prefix", ""))
             key = hashlib.sha1(("%s|%d|%s|%s" % (prompt, seed, cue.text, ref))
                                .encode("utf-8")).hexdigest()[:16]
             prev = manifest.get(str(i))
@@ -612,7 +615,8 @@ class MovieJob(Worker, _VisualMixin, _GpuMixin):
                         raise ComfyError("Cancelled")
                     shot = shots.get(str(i)) or {}
                     values, prompt, seed, subject, ref = shot_values(
-                        runner, actor_map, cue, shot, i)
+                        runner, actor_map, cue, shot, i,
+                        (p.get("options") or {}).get("prompt_prefix", ""))
                     key = hashlib.sha1(("%s|%d|%s|%s" % (prompt, seed, cue.text, ref))
                                        .encode("utf-8")).hexdigest()[:16]
                     prev = manifest.get(str(i))

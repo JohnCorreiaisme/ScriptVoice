@@ -768,6 +768,15 @@ class App(ttk.Frame):
                   text="unload the writing model before drawing, and ComfyUI before "
                        "writing").pack(side="left", padx=8)
 
+        prow = ttk.Frame(top)
+        prow.grid(row=4, column=1, sticky="ew", padx=6, pady=(8, 0))
+        ttk.Label(prow, text="Words in front of every picture prompt:").pack(side="left")
+        self.v_prefix = tk.StringVar()
+        ttk.Entry(prow, textvariable=self.v_prefix, width=34).pack(side="left", padx=6)
+        ttk.Label(prow, foreground="#666",
+                  text="PhotoMaker needs \"a person img\" here; leave empty otherwise"
+                  ).pack(side="left")
+
         vrow = ttk.Frame(top)
         vrow.grid(row=2, column=1, sticky="w", padx=6, pady=(8, 0))
         ttk.Label(vrow, text="Voices from:").pack(side="left")
@@ -837,6 +846,7 @@ class App(ttk.Frame):
         self.v_gap.set(str(o.get("gap_seconds", 0.35)))
         self.v_reuse.set(bool(o.get("reuse_unchanged", True)))
         self.v_free_gpu.set(bool(o.get("free_gpu", False)))
+        self.v_prefix.set(o.get("prompt_prefix", ""))
         backend = o.get("voice_backend", "comfyui")
         for label, key in self.backend_labels.items():
             if key == backend:
@@ -877,6 +887,7 @@ class App(ttk.Frame):
         o["gap_seconds"] = _float(self.v_gap.get(), 0.35)
         o["reuse_unchanged"] = bool(self.v_reuse.get())
         o["free_gpu"] = bool(self.v_free_gpu.get())
+        o["prompt_prefix"] = self.v_prefix.get().strip()
         o["voice_backend"] = self.backend_labels.get(self.v_backend.get(), "comfyui")
         o["output_dir"] = self.v_outdir.get().strip()
         o["max_actors"] = max(1, min(8, _int(self.v_max_actors.get(), 5)))

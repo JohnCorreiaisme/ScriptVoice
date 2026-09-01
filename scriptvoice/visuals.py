@@ -39,18 +39,18 @@ def identity_image(actor):
     return ""
 
 
-def render_portrait(runner, actor, out_dir, cancel=None):
+def render_portrait(runner, actor, out_dir, cancel=None, prefix=""):
     """One locked portrait: same appearance words + same look seed every time."""
     d = actor_dir(out_dir, actor["name"])
     return runner.run(
-        {"prompt": casting.look_prompt(actor),
+        {"prompt": casting.with_prefix(casting.look_prompt(actor), prefix),
          "negative": casting.NEGATIVE,
          "seed": actor.get("look_seed", -1)},
         os.path.join(d, "portrait"), IMAGE, cancel=cancel)
 
 
 def render_turnaround(runner, actor, out_dir, frames=8, cancel=None, on_frame=None,
-                      reference=""):
+                      reference="", prefix=""):
     """A full spin around the character: one frame per angle, one fixed seed.
 
     If the workflow is a real multi-view / orbit workflow (it returns several
@@ -65,6 +65,7 @@ def render_turnaround(runner, actor, out_dir, frames=8, cancel=None, on_frame=No
     if runner.has("image") and reference and os.path.exists(reference):
         ref_name = runner.upload(reference)
 
+    prompts = [(deg, casting.with_prefix(pr, prefix)) for deg, pr in prompts]
     first_values = {"prompt": prompts[0][1], "negative": casting.NEGATIVE, "seed": seed}
     if ref_name:
         first_values["image"] = ref_name

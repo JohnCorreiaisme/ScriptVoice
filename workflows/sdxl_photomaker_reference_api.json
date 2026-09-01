@@ -1,11 +1,11 @@
 {
   "4": {
     "class_type": "CheckpointLoaderSimple",
-    "inputs": { "ckpt_name": "sd_xl_turbo_1.0_fp16.safetensors" }
+    "inputs": { "ckpt_name": "sd_xl_base_1.0.safetensors" }
   },
   "5": {
     "class_type": "EmptyLatentImage",
-    "inputs": { "width": 1024, "height": 1024, "batch_size": 1 }
+    "inputs": { "width": 768, "height": 768, "batch_size": 1 }
   },
   "10": {
     "class_type": "PhotoMakerLoader",
@@ -21,7 +21,7 @@
       "photomaker": ["10", 0],
       "image": ["11", 0],
       "clip": ["4", 1],
-      "text": "a man img, standing in a room, cinematic film still"
+      "text": "a person img, standing in a room, cinematic film still"
     }
   },
   "7": {
@@ -35,10 +35,10 @@
     "class_type": "KSampler",
     "inputs": {
       "seed": 0,
-      "steps": 8,
-      "cfg": 2.0,
-      "sampler_name": "euler",
-      "scheduler": "normal",
+      "steps": 25,
+      "cfg": 5.0,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
       "denoise": 1.0,
       "model": ["4", 0],
       "positive": ["6", 0],

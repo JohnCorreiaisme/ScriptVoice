@@ -1486,6 +1486,43 @@ def suite(sv, check):
     check("the same picture always uploads to the same name", n1 == n1_again)
     check("the name still ends in the right extension", n1.endswith(".png"), n1)
 
+    # ------------------------------- words in front of every picture prompt
+    check.section("[5m] the prompt prefix identity models require")
+    wp = sv.casting.with_prefix
+    check("no prefix leaves the prompt exactly as it was",
+          wp("a man on a pier", "") == "a man on a pier")
+    check("a prefix goes at the very front, where the trigger must be",
+          wp("a man on a pier", "a person img") == "a person img, a man on a pier")
+    check("a trailing comma in the setting does not double up",
+          wp("a man on a pier", "a person img,") == "a person img, a man on a pier")
+    check("it is not added twice if it is already there",
+          wp("a person img, a man on a pier", "a person img")
+          == "a person img, a man on a pier")
+    check("matching ignores case, so 'A Person Img' is not doubled",
+          wp("A Person Img, on a pier", "a person img") == "A Person Img, on a pier")
+    check("a prefix with an empty prompt is still the prefix",
+          wp("", "a person img") == "a person img")
+
+    pf = sv.project.new_project()
+    check("the setting starts empty, so nothing changes for other workflows",
+          pf["options"]["prompt_prefix"] == "")
+
+    pre_map = {"VICTOR": dict(sv.project.new_character("VICTOR"),
+                              appearance="silver hair, heavy build")}
+    pre_cue = sv.script_parser.parse("VICTOR: Say that again." + chr(10))[0]
+    plain = sv.casting.shot_prompt(pre_map, pre_cue, {"shot": "wide shot"})
+    pref = sv.casting.shot_prompt(pre_map, pre_cue, {"shot": "wide shot"},
+                                  prefix="a person img")
+    check("a shot prompt gains the prefix at the front",
+          pref.startswith("a person img, ") and pref.endswith(plain), pref[:60])
+    check("and the shot itself is untouched underneath", plain in pref)
+    check("portraits get it too, or the same workflow would reject them",
+          wp(sv.casting.look_prompt(pre_map["VICTOR"]), "a person img")
+          .startswith("a person img, "))
+    check("every turnaround angle gets it, not just the first",
+          all(wp(pr, "a person img").startswith("a person img, ")
+              for _, pr in sv.casting.turnaround_prompts(pre_map["VICTOR"])))
+
     # --------------------------------------------------------- regeneration
     check.section("[6] the regenerate buttons")
     before_voice = dict(p["characters"]["MAYA"])

@@ -1932,6 +1932,16 @@ def plan_shots(llm, premise, actors, cues, script="", cancel=None):
 
 # ------------------------------------------------------------ prompt builders
 
+def with_prefix(prompt, prefix=""):
+    """Put the project's prefix at the front of a prompt, once."""
+    prefix = str(prefix or "").strip().strip(",")
+    if not prefix:
+        return prompt
+    if prompt.lower().startswith(prefix.lower()):
+        return prompt
+    return "%s, %s" % (prefix, prompt) if prompt else prefix
+
+
 def look_prompt(actor, extra="", style=PORTRAIT_STYLE, wardrobe=True):
     """The prompt that pins this character's appearance. Always the same words."""
     # When the user has written the look themselves it replaces the model's
@@ -1960,7 +1970,8 @@ def turnaround_prompts(actor, angles=None):
     return [(deg, look_prompt(actor, phrase, TURNAROUND_STYLE)) for deg, phrase in angles]
 
 
-def shot_prompt(actor_map, cue, shot, style="cinematic film still, 35mm, natural lighting"):
+def shot_prompt(actor_map, cue, shot, style="cinematic film still, 35mm, natural lighting",
+                prefix=""):
     """The prompt for one movie shot, with the speaker's fixed look folded in."""
     subject = shot_subject(shot, cue, actor_map.keys())
     actor = actor_map.get(subject) or {}
@@ -1977,7 +1988,7 @@ def shot_prompt(actor_map, cue, shot, style="cinematic film still, 35mm, natural
              ("in " + where) if where else "",
              who, ("wearing " + dress) if dress else "",
              shot.get("mood", ""), style]
-    return ", ".join(p.strip(" ,") for p in parts if p and p.strip())
+    return with_prefix(", ".join(p.strip(" ,") for p in parts if p and p.strip()), prefix)
 
 
 NEGATIVE = ("text, watermark, signature, extra limbs, deformed hands, blurry, "
@@ -2168,6 +2179,10 @@ def new_project():
             # stay resident, which is what makes a big model unusable on a small
             # card. When on, each step evicts the other one first.
             "free_gpu": False,
+            # Words put at the very front of every picture prompt. PhotoMaker
+            # and similar identity models require a trigger phrase there, and
+            # it is also the place for a house style.
+            "prompt_prefix": "",
             "output_dir": "",
             "max_actors": 5,
             "scene_count": 4,
@@ -2786,18 +2801,18 @@ def identity_image(actor):
     return ""
 
 
-def render_portrait(runner, actor, out_dir, cancel=None):
+def render_portrait(runner, actor, out_dir, cancel=None, prefix=""):
     """One locked portrait: same appearance words + same look seed every time."""
     d = actor_dir(out_dir, actor["name"])
     return runner.run(
-        {"prompt": casting.look_prompt(actor),
+        {"prompt": casting.with_prefix(casting.look_prompt(actor), prefix),
          "negative": casting.NEGATIVE,
          "seed": actor.get("look_seed", -1)},
         os.path.join(d, "portrait"), IMAGE, cancel=cancel)
 
 
 def render_turnaround(runner, actor, out_dir, frames=8, cancel=None, on_frame=None,
-                      reference=""):
+                      reference="", prefix=""):
     """A full spin around the character: one frame per angle, one fixed seed.
 
     If the workflow is a real multi-view / orbit workflow (it returns several
@@ -2812,6 +2827,7 @@ def render_turnaround(runner, actor, out_dir, frames=8, cancel=None, on_frame=No
     if runner.has("image") and reference and os.path.exists(reference):
         ref_name = runner.upload(reference)
 
+    prompts = [(deg, casting.with_prefix(pr, prefix)) for deg, pr in prompts]
     first_values = {"prompt": prompts[0][1], "negative": casting.NEGATIVE, "seed": seed}
     if ref_name:
         first_values["image"] = ref_name
@@ -3476,7 +3492,9 @@ class _VisualMixin(object):
 
     def render_portrait(self, runner, actor):
         self.progress(actor["name"], "Drawing the portrait...")
-        path = visuals.render_portrait(runner, actor, self.out_dir, cancel=self.cancelled)
+        path = visuals.render_portrait(
+            runner, actor, self.out_dir, cancel=self.cancelled,
+            prefix=(self.project.get("options") or {}).get("prompt_prefix", ""))
         actor["portrait"] = path
         self.emit("asset", name=actor["name"], asset="portrait", path=path)
         return path
@@ -3493,7 +3511,8 @@ class _VisualMixin(object):
 
         files = visuals.render_turnaround(
             runner, actor, self.out_dir, frames=frames, cancel=self.cancelled,
-            on_frame=on_frame, reference=visuals.identity_image(actor))
+            on_frame=on_frame, reference=visuals.identity_image(actor),
+            prefix=(self.project.get("options") or {}).get("prompt_prefix", ""))
         actor["turnaround"] = files
         gif = visuals.make_gif(
             files, os.path.join(visuals.actor_dir(self.out_dir, actor["name"]), "spin.gif"))
@@ -3779,14 +3798,14 @@ class RegenerateJob(Worker, _VisualMixin, _GpuMixin):
         self.result = {"name": actor["name"], "what": self.what}
 
 
-def shot_values(runner, actor_map, cue, shot, index):
+def shot_values(runner, actor_map, cue, shot, index, prefix=""):
     """Everything one storyboard/movie shot is rendered from.
 
     The storyboard and the movie used to build this separately, and they had
     drifted: only the movie passed a reference image, so the pictures being
     judged were not the pictures being filmed. One function, both callers.
     """
-    prompt = casting.shot_prompt(actor_map, cue, shot)
+    prompt = casting.shot_prompt(actor_map, cue, shot, prefix=prefix)
     subject = casting.shot_subject(shot, cue, actor_map.keys())
     actor = actor_map.get(subject) or {}
     seed = int(actor.get("look_seed", 0)) + index
@@ -3905,7 +3924,7 @@ class StoryboardJob(Worker, _VisualMixin, _GpuMixin):
             cue = self.cues[i]
             shot = shots.get(str(i)) or {}
             values, prompt, seed, subject, ref = shot_values(
-                runner, actor_map, cue, shot, i)
+                runner, actor_map, cue, shot, i, opts.get("prompt_prefix", ""))
             key = hashlib.sha1(("%s|%d|%s|%s" % (prompt, seed, cue.text, ref))
                                .encode("utf-8")).hexdigest()[:16]
             prev = manifest.get(str(i))
@@ -3993,7 +4012,8 @@ class MovieJob(Worker, _VisualMixin, _GpuMixin):
                         raise ComfyError("Cancelled")
                     shot = shots.get(str(i)) or {}
                     values, prompt, seed, subject, ref = shot_values(
-                        runner, actor_map, cue, shot, i)
+                        runner, actor_map, cue, shot, i,
+                        (p.get("options") or {}).get("prompt_prefix", ""))
                     key = hashlib.sha1(("%s|%d|%s|%s" % (prompt, seed, cue.text, ref))
                                        .encode("utf-8")).hexdigest()[:16]
                     prev = manifest.get(str(i))
@@ -5183,6 +5203,15 @@ class App(ttk.Frame):
                   text="unload the writing model before drawing, and ComfyUI before "
                        "writing").pack(side="left", padx=8)
 
+        prow = ttk.Frame(top)
+        prow.grid(row=4, column=1, sticky="ew", padx=6, pady=(8, 0))
+        ttk.Label(prow, text="Words in front of every picture prompt:").pack(side="left")
+        self.v_prefix = tk.StringVar()
+        ttk.Entry(prow, textvariable=self.v_prefix, width=34).pack(side="left", padx=6)
+        ttk.Label(prow, foreground="#666",
+                  text="PhotoMaker needs \"a person img\" here; leave empty otherwise"
+                  ).pack(side="left")
+
         vrow = ttk.Frame(top)
         vrow.grid(row=2, column=1, sticky="w", padx=6, pady=(8, 0))
         ttk.Label(vrow, text="Voices from:").pack(side="left")
@@ -5252,6 +5281,7 @@ class App(ttk.Frame):
         self.v_gap.set(str(o.get("gap_seconds", 0.35)))
         self.v_reuse.set(bool(o.get("reuse_unchanged", True)))
         self.v_free_gpu.set(bool(o.get("free_gpu", False)))
+        self.v_prefix.set(o.get("prompt_prefix", ""))
         backend = o.get("voice_backend", "comfyui")
         for label, key in self.backend_labels.items():
             if key == backend:
@@ -5292,6 +5322,7 @@ class App(ttk.Frame):
         o["gap_seconds"] = _float(self.v_gap.get(), 0.35)
         o["reuse_unchanged"] = bool(self.v_reuse.get())
         o["free_gpu"] = bool(self.v_free_gpu.get())
+        o["prompt_prefix"] = self.v_prefix.get().strip()
         o["voice_backend"] = self.backend_labels.get(self.v_backend.get(), "comfyui")
         o["output_dir"] = self.v_outdir.get().strip()
         o["max_actors"] = max(1, min(8, _int(self.v_max_actors.get(), 5)))

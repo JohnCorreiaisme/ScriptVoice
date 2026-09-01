@@ -56,7 +56,7 @@ picture workflow baked in at build time. Everything else in this repository is s
 
 ## What has actually been tested
 
-**Automated: 689 checks** (`python selftest.py`) — run twice, once against the package and once
+**Automated: 731 checks** (`python selftest.py`) — run twice, once against the package and once
 against the flattened single file, so the two cannot drift apart. They use a stub ComfyUI and a
 stub OpenAI-compatible model server, so they need no GPU and no network.
 
@@ -115,6 +115,13 @@ while every metadata check passed.
 - `pip install av` — writing the `.mp4` (optional; without it you get the stills, the audio and
   an EDL)
 
+**To keep a character's face across shots** you need a workflow with a reference-image input.
+`workflows/sdxl_photomaker_reference_api.json` uses the PhotoMaker nodes ComfyUI already ships,
+so no custom node packs — it wants `photomaker-v1.bin` in `models/photomaker/` and
+`sd_xl_base_1.0.safetensors` in `models/checkpoints/`. PhotoMaker needs a trigger phrase at the
+front of the prompt: put `a person img` in *Words in front of every picture prompt* on the Setup
+tab. Measured at 16 s a shot at 768x768 on a 3060.
+
 Nothing else. No accounts, no keys, no network calls beyond `127.0.0.1`.
 
 ---
@@ -125,7 +132,7 @@ Nothing else. No accounts, no keys, no network calls beyond `127.0.0.1`.
 ScriptVoice.py      the whole program in one file (generated)
 build_single.py     flattens scriptvoice/ into it; refuses to build on a name collision
 run.py              runs the package
-selftest.py         689 checks, against both the package and the single file
+selftest.py         731 checks, against both the package and the single file
 gui_selftest.py     56 widget checks against the real window
 scriptvoice/        audio, comfy, casting, llm, movie, pipeline, project, render,
                     script_parser, speech, visuals, widgets, worker, gui

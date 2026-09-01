@@ -145,6 +145,10 @@ def new_project():
             # stay resident, which is what makes a big model unusable on a small
             # card. When on, each step evicts the other one first.
             "free_gpu": False,
+            # Words put at the very front of every picture prompt. PhotoMaker
+            # and similar identity models require a trigger phrase there, and
+            # it is also the place for a house style.
+            "prompt_prefix": "",
             "output_dir": "",
             "max_actors": 5,
             "scene_count": 4,

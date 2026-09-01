@@ -546,6 +546,16 @@ def plan_shots(llm, premise, actors, cues, script="", cancel=None):
 
 # ------------------------------------------------------------ prompt builders
 
+def with_prefix(prompt, prefix=""):
+    """Put the project's prefix at the front of a prompt, once."""
+    prefix = str(prefix or "").strip().strip(",")
+    if not prefix:
+        return prompt
+    if prompt.lower().startswith(prefix.lower()):
+        return prompt
+    return "%s, %s" % (prefix, prompt) if prompt else prefix
+
+
 def look_prompt(actor, extra="", style=PORTRAIT_STYLE, wardrobe=True):
     """The prompt that pins this character's appearance. Always the same words."""
     # When the user has written the look themselves it replaces the model's
@@ -574,7 +584,8 @@ def turnaround_prompts(actor, angles=None):
     return [(deg, look_prompt(actor, phrase, TURNAROUND_STYLE)) for deg, phrase in angles]
 
 
-def shot_prompt(actor_map, cue, shot, style="cinematic film still, 35mm, natural lighting"):
+def shot_prompt(actor_map, cue, shot, style="cinematic film still, 35mm, natural lighting",
+                prefix=""):
     """The prompt for one movie shot, with the speaker's fixed look folded in."""
     subject = shot_subject(shot, cue, actor_map.keys())
     actor = actor_map.get(subject) or {}
@@ -591,7 +602,7 @@ def shot_prompt(actor_map, cue, shot, style="cinematic film still, 35mm, natural
              ("in " + where) if where else "",
              who, ("wearing " + dress) if dress else "",
              shot.get("mood", ""), style]
-    return ", ".join(p.strip(" ,") for p in parts if p and p.strip())
+    return with_prefix(", ".join(p.strip(" ,") for p in parts if p and p.strip()), prefix)
 
 
 NEGATIVE = ("text, watermark, signature, extra limbs, deformed hands, blurry, "

@@ -1,0 +1,57 @@
+{
+  "4": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": { "ckpt_name": "sd_xl_turbo_1.0_fp16.safetensors" }
+  },
+  "5": {
+    "class_type": "EmptyLatentImage",
+    "inputs": { "width": 1024, "height": 1024, "batch_size": 1 }
+  },
+  "10": {
+    "class_type": "PhotoMakerLoader",
+    "inputs": { "photomaker_model_name": "photomaker-v1.bin" }
+  },
+  "11": {
+    "class_type": "LoadImage",
+    "inputs": { "image": "example.png", "upload": "image" }
+  },
+  "6": {
+    "class_type": "PhotoMakerEncode",
+    "inputs": {
+      "photomaker": ["10", 0],
+      "image": ["11", 0],
+      "clip": ["4", 1],
+      "text": "a man img, standing in a room, cinematic film still"
+    }
+  },
+  "7": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "text, watermark, deformed hands, blurry, lowres",
+      "clip": ["4", 1]
+    }
+  },
+  "3": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": 0,
+      "steps": 8,
+      "cfg": 2.0,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 1.0,
+      "model": ["4", 0],
+      "positive": ["6", 0],
+      "negative": ["7", 0],
+      "latent_image": ["5", 0]
+    }
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "inputs": { "samples": ["3", 0], "vae": ["4", 2] }
+  },
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": { "images": ["8", 0], "filename_prefix": "ScriptVoice" }
+  }
+}

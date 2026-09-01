@@ -1431,6 +1431,61 @@ def suite(sv, check):
                                            "mapping": {"prompt": "6.text"}}}),
               "portrait")))
 
+    # ------------------------------------- the reference-conditioning workflow
+    check.section("[5l] the PhotoMaker workflow that locks a face")
+    pm_path = os.path.join(HERE, "workflows", "sdxl_photomaker_reference_api.json")
+    if os.path.exists(pm_path):
+        pm = sv.project.load_workflow(pm_path)
+        check("it is a valid API-format workflow", len(pm) >= 8, "%d nodes" % len(pm))
+        classes = sorted(n["class_type"] for n in pm.values())
+        check("it uses the PhotoMaker nodes ComfyUI already ships",
+              "PhotoMakerLoader" in classes and "PhotoMakerEncode" in classes,
+              str(classes))
+        check("it takes a reference image", "LoadImage" in classes, str(classes))
+        pmap = sv.project.guess_mapping(pm, "shot")
+        check("the prompt is mapped to PhotoMaker, not a plain text encoder",
+              pmap.get("prompt", "").split(".")[0] and
+              pm[pmap["prompt"].split(".")[0]]["class_type"] == "PhotoMakerEncode",
+              pmap.get("prompt"))
+        check("the reference image is mapped to the loader",
+              pm[pmap.get("image", ".").split(".")[0]]["class_type"] == "LoadImage",
+              pmap.get("image"))
+        check("nothing a shot needs is left unmapped",
+              not [k for k, _, req in sv.project.WORKFLOW_SLOTS["shot"]["keys"]
+                   if req and not pmap.get(k)],
+              str(sorted(pmap)))
+        check("a workflow with a reference input reports that it can lock a face",
+              sv.jobs.SlotRunner(sv.comfy.ComfyClient("127.0.0.1", 9998),
+                                 dict(sv.project.new_project(),
+                                      workflows={"shot": {"path": pm_path,
+                                                          "mapping": pmap}}),
+                                 "shot").has("image"))
+
+    # two characters must never share one uploaded reference
+    a_png = os.path.join(work, "ref_a", "portrait.png")
+    b_png = os.path.join(work, "ref_b", "portrait.png")
+    for f, shade in ((a_png, 40), (b_png, 200)):
+        os.makedirs(os.path.dirname(f), exist_ok=True)
+        make_png(f, shade=shade)
+    up = []
+
+    class _UpClient(object):
+        def upload_audio(self, path, subfolder="scriptvoice"):
+            import hashlib as _h
+            data = io.open(path, "rb").read()
+            stem, ext = os.path.splitext(os.path.basename(path))
+            name = "%s/%s_%s%s" % (subfolder, stem, _h.sha1(data).hexdigest()[:10], ext)
+            up.append(name)
+            return name
+
+    c = _UpClient()
+    n1, n2, n1_again = (c.upload_audio(a_png), c.upload_audio(b_png),
+                        c.upload_audio(a_png))
+    check("two characters whose portraits share a filename do not collide",
+          n1 != n2, "%s vs %s" % (n1, n2))
+    check("the same picture always uploads to the same name", n1 == n1_again)
+    check("the name still ends in the right extension", n1.endswith(".png"), n1)
+
     # --------------------------------------------------------- regeneration
     check.section("[6] the regenerate buttons")
     before_voice = dict(p["characters"]["MAYA"])

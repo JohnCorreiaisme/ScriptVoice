@@ -1132,6 +1132,7 @@ def extract_json(text, expect="object"):
 
 """Minimal ComfyUI HTTP client. Stdlib only, fully offline (localhost)."""
 
+import hashlib
 import json
 import os
 import time
@@ -1319,9 +1320,13 @@ class ComfyClient:
 
         Returns the name the workflow should use in a LoadAudio node.
         """
-        name = os.path.basename(path)
         with open(path, "rb") as f:
             content = f.read()
+        # cast/HAROLD/portrait.png and cast/JEANNE/portrait.png share a basename,
+        # so uploading by basename put every character on one file and every shot
+        # was then conditioned on whoever went last. Name by content instead.
+        stem, ext = os.path.splitext(os.path.basename(path))
+        name = "%s_%s%s" % (stem, hashlib.sha1(content).hexdigest()[:10], ext)
         boundary = "----scriptvoice%s" % uuid.uuid4().hex
         parts = []
 

@@ -2084,6 +2084,28 @@ NEGATIVE_WORDS = ("negative", "neg_", "_neg")
 DEFAULT_WORKFLOW = "sdxl_turbo_actor_api.json"
 DEFAULT_SLOTS = ("portrait", "turnaround", "shot")
 
+# The single-file build bakes the default workflow in here, so ScriptVoice.py
+# can draw on its own with nothing beside it. Empty when running the package,
+# which reads workflows/ off disk instead.
+EMBEDDED_WORKFLOW_JSON = ""
+BUILTIN = "(built in: SDXL Turbo)"
+
+
+def builtin_workflow():
+    """The default workflow as a dict: from disk if it is there, else baked in."""
+    path = bundled_workflow()
+    if path:
+        try:
+            return load_workflow(path)
+        except Exception:
+            pass
+    if EMBEDDED_WORKFLOW_JSON:
+        try:
+            return json.loads(EMBEDDED_WORKFLOW_JSON)
+        except ValueError:
+            pass
+    return None
+
 
 def bundled_workflow(name=DEFAULT_WORKFLOW):
     """The full path to a workflow shipped with the program, or ""."""
@@ -2101,13 +2123,10 @@ def adopt_default_workflows(p):
     Only ever fills a slot that is empty, so an opened project and anything the
     user chose by hand are left exactly as they are.
     """
-    path = bundled_workflow()
-    if not path:
+    wf = builtin_workflow()
+    if not wf:
         return []
-    try:
-        wf = load_workflow(path)
-    except Exception:
-        return []
+    path = bundled_workflow() or BUILTIN
     filled = []
     for slot in DEFAULT_SLOTS:
         cfg = (p.setdefault("workflows", {})
@@ -2337,7 +2356,16 @@ def workflow_cfg(project, slot):
 # ---------------- workflow handling ----------------
 
 def load_workflow(path):
-    """Load a ComfyUI workflow saved in *API format* and validate it."""
+    """Load a ComfyUI workflow saved in *API format* and validate it.
+
+    The sentinel BUILTIN means the copy baked into the single file, which has
+    no path on disk to read.
+    """
+    if path == BUILTIN:
+        wf = json.loads(EMBEDDED_WORKFLOW_JSON or "{}")
+        if not wf:
+            raise ValueError("This build has no workflow baked into it.")
+        return wf
     with open(path, "r", encoding="utf-8") as f:
         wf = json.load(f)
     if isinstance(wf, dict) and "nodes" in wf and "links" in wf:
@@ -2541,7 +2569,8 @@ class SlotRunner(object):
         self.path = cfg.get("path") or ""
         self.mapping = dict(cfg.get("mapping") or {})
         self.label = proj.WORKFLOW_SLOTS[slot]["label"]
-        if not self.path or not os.path.exists(self.path):
+        if not self.path or (self.path != proj.BUILTIN
+                             and not os.path.exists(self.path)):
             raise ComfyError(
                 "No workflow set for '%s'.\nPick one on the Workflows tab." % self.label)
         self.workflow = proj.load_workflow(self.path)
@@ -6525,3 +6554,8 @@ audio = runtime = speech = script_parser = llm = llm_mod = comfy = casting = pro
 
 if __name__ == "__main__":
     main()
+
+
+# The default picture workflow, baked in at build time so this file
+# works on its own. Load your own on the Setup tab to replace it.
+EMBEDDED_WORKFLOW_JSON = '{"4":{"class_type":"CheckpointLoaderSimple","inputs":{"ckpt_name":"sd_xl_turbo_1.0_fp16.safetensors"},"_meta":{"title":"Load SDXL Turbo"}},"5":{"class_type":"EmptyLatentImage","inputs":{"width":512,"height":768,"batch_size":1},"_meta":{"title":"Canvas"}},"6":{"class_type":"CLIPTextEncode","inputs":{"text":"a photograph of a person standing in a room, full body","clip":["4",1]},"_meta":{"title":"Positive prompt"}},"7":{"class_type":"CLIPTextEncode","inputs":{"text":"text, watermark, blurry, deformed hands, cropped head","clip":["4",1]},"_meta":{"title":"Negative prompt"}},"3":{"class_type":"KSampler","inputs":{"seed":0,"steps":8,"cfg":1.5,"sampler_name":"euler_ancestral","scheduler":"normal","denoise":1.0,"model":["4",0],"positive":["6",0],"negative":["7",0],"latent_image":["5",0]},"_meta":{"title":"Sampler (turbo settings)"}},"8":{"class_type":"VAEDecode","inputs":{"samples":["3",0],"vae":["4",2]},"_meta":{"title":"Decode"}},"9":{"class_type":"SaveImage","inputs":{"images":["8",0],"filename_prefix":"scriptvoice"},"_meta":{"title":"Save"}}}'

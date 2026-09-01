@@ -20,7 +20,8 @@ class SlotRunner(object):
         self.path = cfg.get("path") or ""
         self.mapping = dict(cfg.get("mapping") or {})
         self.label = proj.WORKFLOW_SLOTS[slot]["label"]
-        if not self.path or not os.path.exists(self.path):
+        if not self.path or (self.path != proj.BUILTIN
+                             and not os.path.exists(self.path)):
             raise ComfyError(
                 "No workflow set for '%s'.\nPick one on the Workflows tab." % self.label)
         self.workflow = proj.load_workflow(self.path)

@@ -9,6 +9,7 @@ directory, no installer. Edit the modules in scriptvoice/ and re-run this.
 import ast
 import os
 import re
+import json
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -100,6 +101,28 @@ def top_level_names(src, module):
     return [(n, module) for n in names]
 
 
+def _embedded_workflow():
+    """The default workflow, baked in so the single file needs nothing beside it.
+
+    The JSON file stays the one source of truth; this is a copy taken at build
+    time. json.dumps of the parsed file, so a malformed workflow fails the build
+    rather than shipping.
+    """
+    path = os.path.join(HERE, "workflows", "sdxl_turbo_actor_api.json")
+    if not os.path.exists(path):
+        print("WARNING: no default workflow to embed; the single file will need "
+              "a workflow loaded by hand.")
+        return ""
+    with open(path, "r", encoding="utf-8") as f:
+        wf = json.load(f)
+    for node in wf.values():
+        if "class_type" not in node:
+            raise SystemExit("The default workflow is not in API format.")
+    return ("\n\n# The default picture workflow, baked in at build time so this file\n"
+            "# works on its own. Load your own on the Setup tab to replace it.\n"
+            "EMBEDDED_WORKFLOW_JSON = %r\n" % json.dumps(wf, separators=(",", ":")))
+
+
 def main():
     seen = {}
     clashes = []
@@ -131,6 +154,7 @@ def main():
 
     alias_line = " = ".join(ALIASES) + " = _self"
     chunks.append(FOOTER % alias_line)
+    chunks.append(_embedded_workflow())
     text = "".join(chunks)
 
     ast.parse(text)                      # never ship a file that doesn't parse

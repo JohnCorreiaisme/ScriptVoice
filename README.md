@@ -47,13 +47,16 @@ python ScriptVoice.py        # one self-contained file, no package needed
 python run.py                # the scriptvoice/ package, for development
 ```
 
+`ScriptVoice.py` really is on its own: copy that one file anywhere and it runs, with the default
+picture workflow baked in at build time. Everything else in this repository is source and tests.
+
 `ScriptVoice.py` is generated — edit `scriptvoice/*.py` and run `python build_single.py`.
 
 ---
 
 ## What has actually been tested
 
-**Automated: 678 checks** (`python selftest.py`) — run twice, once against the package and once
+**Automated: 689 checks** (`python selftest.py`) — run twice, once against the package and once
 against the flattened single file, so the two cannot drift apart. They use a stub ComfyUI and a
 stub OpenAI-compatible model server, so they need no GPU and no network.
 
@@ -122,7 +125,7 @@ Nothing else. No accounts, no keys, no network calls beyond `127.0.0.1`.
 ScriptVoice.py      the whole program in one file (generated)
 build_single.py     flattens scriptvoice/ into it; refuses to build on a name collision
 run.py              runs the package
-selftest.py         678 checks, against both the package and the single file
+selftest.py         689 checks, against both the package and the single file
 gui_selftest.py     56 widget checks against the real window
 scriptvoice/        audio, comfy, casting, llm, movie, pipeline, project, render,
                     script_parser, speech, visuals, widgets, worker, gui

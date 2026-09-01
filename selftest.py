@@ -10,6 +10,7 @@ turnarounds, voices, regeneration, and the movie cut.
 
 import importlib.util
 import hashlib
+import io
 import json
 import math
 import os
@@ -302,6 +303,15 @@ def base_project(sv, work, wf_voice, wf_image):
     p["options"]["output_dir"] = os.path.join(work, "out")
     p["options"]["turnaround_frames"] = 8
     return p
+
+
+def _raises(fn):
+    """True if calling fn() raises anything at all."""
+    try:
+        fn()
+        return False
+    except Exception:
+        return True
 
 
 def run_job(job, timeout=120):
@@ -1370,6 +1380,56 @@ def suite(sv, check):
     check("swapping the reference face makes the shot stale",
           key_of(prompt2, seed2, cue2.text, port)
           != key_of(prompt2, seed2, cue2.text, mine))
+
+    # ---------------------------------------- the single file on its own
+    check.section("[5k] ScriptVoice.py with nothing beside it")
+    if sv.label == "single file":
+        check("the default workflow is baked into the built file",
+              bool(getattr(sv.project, "EMBEDDED_WORKFLOW_JSON", "")),
+              "%d bytes" % len(getattr(sv.project, "EMBEDDED_WORKFLOW_JSON", "")))
+        baked = json.loads(sv.project.EMBEDDED_WORKFLOW_JSON)
+        check("what was baked in is a real API-format workflow",
+              baked and all("class_type" in n for n in baked.values()),
+              str(len(baked)) + " nodes")
+        check("it matches the workflow file it was built from",
+              baked == json.load(io.open(os.path.join(HERE, "workflows",
+                                                      "sdxl_turbo_actor_api.json"),
+                                         encoding="utf-8")))
+    saved_bundled = sv.project.bundled_workflow
+    try:
+        # exactly the situation of copying the one file somewhere on its own
+        sv.project.bundled_workflow = lambda *a, **k: ""
+        alone = sv.project.new_project()
+        filled = sv.project.adopt_default_workflows(alone)
+        if sv.label == "single file":
+            check("with no workflows folder the built file still fills its slots",
+                  set(filled) == {"portrait", "turnaround", "shot"}, str(filled))
+            check("and points them at the built-in copy",
+                  alone["workflows"]["portrait"]["path"] == sv.project.BUILTIN,
+                  alone["workflows"]["portrait"]["path"])
+            check("the built-in copy loads without touching the disk",
+                  bool(sv.project.load_workflow(sv.project.BUILTIN)))
+            check("and its inputs are worked out the same way",
+                  {"prompt", "negative", "seed"}
+                  <= set(alone["workflows"]["portrait"]["mapping"]),
+                  str(sorted(alone["workflows"]["portrait"]["mapping"])))
+            runner_ok = sv.jobs.SlotRunner(
+                sv.comfy.ComfyClient("127.0.0.1", 9998), alone, "portrait")
+            check("a runner accepts the built-in path instead of demanding a file",
+                  runner_ok.workflow is not None)
+        else:
+            check("the package with no workflows folder fills nothing, and says so",
+                  filled == [], str(filled))
+    finally:
+        sv.project.bundled_workflow = saved_bundled
+
+    check("a workflow path that is neither built-in nor real is refused",
+          _raises(lambda: sv.jobs.SlotRunner(
+              sv.comfy.ComfyClient("127.0.0.1", 9998),
+              dict(sv.project.new_project(),
+                   workflows={"portrait": {"path": os.path.join(work, "nope.json"),
+                                           "mapping": {"prompt": "6.text"}}}),
+              "portrait")))
 
     # --------------------------------------------------------- regeneration
     check.section("[6] the regenerate buttons")

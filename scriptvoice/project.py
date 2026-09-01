@@ -66,6 +66,28 @@ NEGATIVE_WORDS = ("negative", "neg_", "_neg")
 DEFAULT_WORKFLOW = "sdxl_turbo_actor_api.json"
 DEFAULT_SLOTS = ("portrait", "turnaround", "shot")
 
+# The single-file build bakes the default workflow in here, so ScriptVoice.py
+# can draw on its own with nothing beside it. Empty when running the package,
+# which reads workflows/ off disk instead.
+EMBEDDED_WORKFLOW_JSON = ""
+BUILTIN = "(built in: SDXL Turbo)"
+
+
+def builtin_workflow():
+    """The default workflow as a dict: from disk if it is there, else baked in."""
+    path = bundled_workflow()
+    if path:
+        try:
+            return load_workflow(path)
+        except Exception:
+            pass
+    if EMBEDDED_WORKFLOW_JSON:
+        try:
+            return json.loads(EMBEDDED_WORKFLOW_JSON)
+        except ValueError:
+            pass
+    return None
+
 
 def bundled_workflow(name=DEFAULT_WORKFLOW):
     """The full path to a workflow shipped with the program, or ""."""
@@ -83,13 +105,10 @@ def adopt_default_workflows(p):
     Only ever fills a slot that is empty, so an opened project and anything the
     user chose by hand are left exactly as they are.
     """
-    path = bundled_workflow()
-    if not path:
+    wf = builtin_workflow()
+    if not wf:
         return []
-    try:
-        wf = load_workflow(path)
-    except Exception:
-        return []
+    path = bundled_workflow() or BUILTIN
     filled = []
     for slot in DEFAULT_SLOTS:
         cfg = (p.setdefault("workflows", {})
@@ -319,7 +338,16 @@ def workflow_cfg(project, slot):
 # ---------------- workflow handling ----------------
 
 def load_workflow(path):
-    """Load a ComfyUI workflow saved in *API format* and validate it."""
+    """Load a ComfyUI workflow saved in *API format* and validate it.
+
+    The sentinel BUILTIN means the copy baked into the single file, which has
+    no path on disk to read.
+    """
+    if path == BUILTIN:
+        wf = json.loads(EMBEDDED_WORKFLOW_JSON or "{}")
+        if not wf:
+            raise ValueError("This build has no workflow baked into it.")
+        return wf
     with open(path, "r", encoding="utf-8") as f:
         wf = json.load(f)
     if isinstance(wf, dict) and "nodes" in wf and "links" in wf:

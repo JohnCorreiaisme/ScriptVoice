@@ -78,8 +78,41 @@ def concat_wavs(paths, dest, gap_seconds=0.35, trim=False):
 
 
 def duration(path):
+    """Seconds of audio in `path`, or 0.0 if it cannot be read.
+
+    WAV is read with the standard library. ComfyUI's SaveAudio writes FLAC, and
+    the TTS packs emit MP3 and Opus too, so anything else goes through PyAV -
+    already needed for writing the movie. A line measured at 0.0 would take no
+    time in the cut, so this is worth the fallback.
+    """
     try:
         with wave.open(path, "rb") as w:
-            return w.getnframes() / float(w.getframerate())
+            rate = float(w.getframerate())
+            if rate > 0:
+                return w.getnframes() / rate
+    except Exception:
+        pass
+    return _duration_pyav(path)
+
+
+def _duration_pyav(path):
+    """Length of any format PyAV can open, or 0.0."""
+    try:
+        import av
+    except Exception:
+        return 0.0
+    try:
+        with av.open(path) as container:
+            if container.duration:
+                return float(container.duration) / av.time_base
+            for stream in container.streams.audio:
+                if stream.duration and stream.time_base:
+                    return float(stream.duration * stream.time_base)
+            # Some encoders write no duration header at all; count the frames.
+            frames, rate = 0, 0
+            for frame in container.decode(audio=0):
+                frames += frame.samples
+                rate = frame.sample_rate or rate
+            return frames / float(rate) if rate else 0.0
     except Exception:
         return 0.0

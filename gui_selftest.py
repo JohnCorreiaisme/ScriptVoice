@@ -342,6 +342,72 @@ ok("removing a character drops their card", "BANKER" not in app.cards)
 ok("and leaves the rest of the cast alone", set(app.cards) == {"MAYA", "RUBEN"},
    str(sorted(app.cards)))
 
+# --- the Setup tab is where the settings actually are ---
+app.nb.select(app.tab_wf)
+root.update()
+pages = [app.setup_book.tab(i, "text").strip()
+         for i in range(app.setup_book.index("end"))]
+ok("Setup has plain-language pages",
+   pages == ["Everyday", "What draws and speaks", "Advanced"], str(pages))
+
+for label, widget in (("voice backend", "v_backend"), ("prompt prefix", "v_prefix"),
+                      ("output folder", "v_outdir"), ("free the GPU", "v_free_gpu"),
+                      ("silence gap", "v_gap"), ("re-use", "v_reuse")):
+    ok("the %s setting lives on Setup, not Movie" % label, hasattr(app, widget))
+
+# every job visible at once, rather than hidden behind a dropdown
+app.setup_book.select(1)
+root.update()
+rows = app.slot_tree.get_children()
+ok("every workflow job has its own visible row", len(rows) == 4, str(rows))
+ok("each row says whether it is ready",
+   all(app.slot_tree.set(r, "state") for r in rows),
+   str([app.slot_tree.set(r, "state") for r in rows]))
+ok("the built-in picture workflow reads as ready",
+   app.slot_tree.set("portrait", "state") == "ready",
+   app.slot_tree.set("portrait", "state"))
+ok("a job with no workflow says so plainly",
+   app.slot_tree.set("voice", "state") == "not set",
+   app.slot_tree.set("voice", "state"))
+
+# the loop that hung the window: selecting a row must settle, not cascade
+calls = {"n": 0}
+real_refresh = app._refresh_slot_tree
+
+
+def counted():
+    calls["n"] += 1
+    if calls["n"] > 40:
+        raise RuntimeError("the slot table is refreshing itself in a loop")
+    return real_refresh()
+
+
+app._refresh_slot_tree = counted
+for r in rows:
+    app.slot_tree.selection_set(r)
+    root.update()
+ok("selecting a job settles instead of looping", calls["n"] <= 8, "%d refreshes" % calls["n"])
+app._refresh_slot_tree = real_refresh
+
+# the path label is a message when empty; it must never become the stored path
+app.slot_tree.selection_set("voice")
+root.update()
+app._collect_ui_into_project()
+stored = sv.project.workflow_cfg(app.project, "voice").get("path", "")
+ok("the empty-state message is never written back as a filename",
+   "no workflow chosen" not in stored, repr(stored))
+ok("and an unset job stays unset", stored == "", repr(stored))
+
+# the Movie tab says what it is about to use
+app.nb.select(app.tab_movie)
+app._movie_ready_note()
+root.update()
+note = app.v_movie_ready.get()
+ok("the Movie tab states which voices it will use", "Voices:" in note, note[:60])
+ok("and which picture workflow", "Pictures:" in note, note[:60])
+ok("and warns when faces will not be locked",
+   "drift" in note or "locks" in note, note)
+
 root.destroy()
 print("\n%d failed" % len(fails))
 sys.exit(1 if fails else 0)

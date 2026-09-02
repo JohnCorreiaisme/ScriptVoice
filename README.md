@@ -38,7 +38,10 @@ Six tabs, in the order you'd actually work:
    listener, not the speaker. Per shot you can pick that face yourself and write your own shot
    description; both survive a replan.
 5. **Movie** — records every line, cuts the stills against the audio, writes an `.mp4` and an EDL.
-6. **Setup** — ComfyUI address, workflow slots, voices, and *Free the GPU between steps*.
+6. **Setup** — three pages. *Everyday*: ComfyUI's address, where voices come from, the
+   words in front of every picture prompt, where files go, and freeing the GPU between
+   steps. *What draws and speaks*: one visible row per job saying which workflow is
+   loaded and whether it is ready. *Advanced*: every input a workflow exposes.
 
 Two ways to run it, same program:
 
@@ -60,7 +63,7 @@ picture workflow baked in at build time. Everything else in this repository is s
 against the flattened single file, so the two cannot drift apart. They use a stub ComfyUI and a
 stub OpenAI-compatible model server, so they need no GPU and no network.
 
-**Interface: 56 checks** (`python gui_selftest.py`) — drives the real Tk window: that a control
+**Interface: 73 checks** (`python gui_selftest.py`) — drives the real Tk window: that a control
 exists, is wired to the right handler, and is on screen at the default window size.
 
 **On real hardware** — Windows 11, RTX 3060 12 GB, ComfyUI with SDXL-Turbo, LM Studio serving
@@ -133,7 +136,7 @@ ScriptVoice.py      the whole program in one file (generated)
 build_single.py     flattens scriptvoice/ into it; refuses to build on a name collision
 run.py              runs the package
 selftest.py         731 checks, against both the package and the single file
-gui_selftest.py     56 widget checks against the real window
+gui_selftest.py     73 widget checks against the real window
 scriptvoice/        audio, comfy, casting, llm, movie, pipeline, project, render,
                     script_parser, speech, visuals, widgets, worker, gui
 workflows/          example API-format ComfyUI workflows

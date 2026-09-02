@@ -634,51 +634,129 @@ class App(ttk.Frame):
     # ----------------------------------------------------------- workflow tab
 
     def _build_workflow_tab(self):
+        """Everything you might want to change, grouped the way you'd look for it."""
         t = self.tab_wf
-        srv = ttk.LabelFrame(t, text="Local ComfyUI server", padding=10)
+        book = ttk.Notebook(t)
+        book.pack(fill="both", expand=True)
+        self.setup_book = book
+
+        basic = ttk.Frame(book, padding=10)
+        book.add(basic, text="  Everyday  ")
+        wfpage = ttk.Frame(book, padding=10)
+        book.add(wfpage, text="  What draws and speaks  ")
+        adv = ttk.Frame(book, padding=10)
+        book.add(adv, text="  Advanced  ")
+
+        # ---------------------------------------------------- Everyday page
+        srv = ttk.LabelFrame(basic, text="1. ComfyUI", padding=10)
         srv.pack(fill="x")
         self.v_host = tk.StringVar()
         self.v_port = tk.StringVar()
-        ttk.Label(srv, text="Host:").pack(side="left")
-        ttk.Entry(srv, textvariable=self.v_host, width=16).pack(side="left", padx=(4, 12))
-        ttk.Label(srv, text="Port:").pack(side="left")
-        ttk.Entry(srv, textvariable=self.v_port, width=8).pack(side="left", padx=4)
-        ttk.Button(srv, text="Test connection", command=self.test_connection).pack(side="left", padx=12)
+        ttk.Label(srv, text="Address:").pack(side="left")
+        ttk.Entry(srv, textvariable=self.v_host, width=14).pack(side="left", padx=(4, 2))
+        ttk.Label(srv, text=":").pack(side="left")
+        ttk.Entry(srv, textvariable=self.v_port, width=7).pack(side="left", padx=2)
+        ttk.Button(srv, text="Test connection",
+                   command=self.test_connection).pack(side="left", padx=10)
         ttk.Button(srv, text="Open ComfyUI", command=self.open_comfy).pack(side="left")
 
-        pick = ttk.Frame(t)
-        pick.pack(fill="x", pady=(10, 0))
-        ttk.Label(pick, text="Job:").pack(side="left")
-        self.v_slot = tk.StringVar()
-        self.slot_labels = {proj.WORKFLOW_SLOTS[s]["label"]: s for s in proj.WORKFLOW_SLOTS}
-        cb = ttk.Combobox(pick, textvariable=self.v_slot, state="readonly", width=52,
-                          values=[proj.WORKFLOW_SLOTS[s]["label"] for s in proj.WORKFLOW_SLOTS])
-        cb.pack(side="left", padx=6)
-        cb.bind("<<ComboboxSelected>>", lambda e: self._show_slot())
-        self.v_slot_state = tk.StringVar(value="")
-        ttk.Label(pick, textvariable=self.v_slot_state, foreground="#666").pack(side="left", padx=8)
+        vb = ttk.LabelFrame(basic, text="2. Where the voices come from", padding=10)
+        vb.pack(fill="x", pady=(10, 0))
+        self.v_backend = tk.StringVar()
+        self.backend_labels = {
+            "A ComfyUI text-to-speech workflow": "comfyui",
+            "The voices built into Windows": "system",
+        }
+        cb = ttk.Combobox(vb, textvariable=self.v_backend, state="readonly", width=36,
+                          values=list(self.backend_labels))
+        cb.pack(side="left")
+        cb.bind("<<ComboboxSelected>>", lambda e: self._backend_changed())
+        self.v_backend_note = tk.StringVar(value="")
+        ttk.Label(vb, textvariable=self.v_backend_note,
+                  foreground="#666").pack(side="left", padx=10)
 
-        wfb = ttk.LabelFrame(t, text="Workflow (API format)", padding=10)
-        wfb.pack(fill="x", pady=(8, 0))
-        wfb.columnconfigure(1, weight=1)
-        self.v_wf_path = tk.StringVar()
-        ttk.Label(wfb, text="File:").grid(row=0, column=0, sticky="w")
-        ttk.Entry(wfb, textvariable=self.v_wf_path).grid(row=0, column=1, sticky="ew", padx=6)
-        ttk.Button(wfb, text="Browse...", command=self.pick_workflow).grid(row=0, column=2)
-        ttk.Label(wfb, foreground="#666",
+        pb = ttk.LabelFrame(basic, text="3. Words in front of every picture prompt", padding=10)
+        pb.pack(fill="x", pady=(10, 0))
+        self.v_prefix = tk.StringVar()
+        ttk.Entry(pb, textvariable=self.v_prefix, width=36).pack(side="left")
+        ttk.Label(pb, foreground="#666", wraplength=520, justify="left",
+                  text="Identity workflows like PhotoMaker need a trigger phrase here - "
+                       "\"a person img\". Leave it empty for a plain picture workflow."
+                  ).pack(side="left", padx=10)
+
+        ob = ttk.LabelFrame(basic, text="4. Where the files go", padding=10)
+        ob.pack(fill="x", pady=(10, 0))
+        ob.columnconfigure(1, weight=1)
+        self.v_outdir = tk.StringVar()
+        ttk.Label(ob, text="Folder:").grid(row=0, column=0, sticky="w")
+        ttk.Entry(ob, textvariable=self.v_outdir).grid(row=0, column=1, sticky="ew", padx=6)
+        ttk.Button(ob, text="Browse...", command=self.pick_outdir).grid(row=0, column=2)
+        orow = ttk.Frame(ob)
+        orow.grid(row=1, column=1, sticky="w", padx=6, pady=(8, 0))
+        self.v_gap = tk.StringVar()
+        self.v_reuse = tk.BooleanVar(value=True)
+        ttk.Label(orow, text="Silence between lines (s):").pack(side="left")
+        ttk.Entry(orow, textvariable=self.v_gap, width=6).pack(side="left", padx=6)
+        ttk.Checkbutton(orow, text="Re-use anything that hasn't changed",
+                        variable=self.v_reuse).pack(side="left", padx=12)
+
+        gb = ttk.LabelFrame(basic, text="5. Graphics card", padding=10)
+        gb.pack(fill="x", pady=(10, 0))
+        self.v_free_gpu = tk.BooleanVar(value=False)
+        ttk.Checkbutton(gb, text="Free the GPU between steps",
+                        variable=self.v_free_gpu).pack(side="left")
+        ttk.Label(gb, foreground="#666", wraplength=520, justify="left",
+                  text="Unloads the writing model before drawing, and ComfyUI before writing. "
+                       "Turn this on if the two do not fit on your card at once."
+                  ).pack(side="left", padx=10)
+
+        # ------------------------------------------ What draws and speaks page
+        ttk.Label(wfpage, font=("Segoe UI", 10, "bold"),
+                  text="One ComfyUI workflow per job. Double-click a row to choose its file."
+                  ).pack(anchor="w")
+        ttk.Label(wfpage, foreground="#666", wraplength=760, justify="left",
                   text="In ComfyUI: Settings > enable Dev mode, then Workflow > Export (API). "
-                       "The voice slot is required; the picture slots are optional."
-                  ).grid(row=1, column=1, sticky="w", padx=6, pady=(2, 0))
+                       "A picture workflow is built in, so the drawing jobs work out of the box; "
+                       "speaking needs one you provide."
+                  ).pack(anchor="w", pady=(2, 8))
 
-        self.mapbox = ttk.LabelFrame(t, text="Which inputs should ScriptVoice drive?", padding=10)
+        self.slot_tree = ttk.Treeview(wfpage, columns=("job", "file", "state"),
+                                      show="headings", height=5)
+        for col, w, a in (("job", 250, "w"), ("file", 330, "w"), ("state", 150, "w")):
+            self.slot_tree.heading(col, text={"job": "Job", "file": "Workflow file",
+                                              "state": "Status"}[col])
+            self.slot_tree.column(col, width=w, anchor=a)
+        self.slot_tree.pack(fill="x")
+        self.slot_tree.bind("<<TreeviewSelect>>", lambda e: self._show_slot())
+        self.slot_tree.bind("<Double-1>", lambda e: self.pick_workflow())
+
+        row = ttk.Frame(wfpage)
+        row.pack(fill="x", pady=(8, 0))
+        ttk.Button(row, text="Choose a workflow file...",
+                   command=self.pick_workflow).pack(side="left")
+        ttk.Button(row, text="Work out the inputs again",
+                   command=self.autodetect_mapping).pack(side="left", padx=6)
+        self.v_wf_path = tk.StringVar()
+        ttk.Label(row, textvariable=self.v_wf_path, foreground="#666").pack(side="left", padx=10)
+
+        self.mapbox = ttk.LabelFrame(
+            wfpage, text="What ScriptVoice sends into the selected workflow", padding=10)
         self.mapbox.pack(fill="x", pady=(10, 0))
         self.mapbox.columnconfigure(1, weight=1)
         self.map_vars = {}
+        self.v_slot_state = tk.StringVar(value="")
+        ttk.Label(wfpage, textvariable=self.v_slot_state,
+                  foreground="#666").pack(anchor="w", pady=(8, 0))
 
-        insp = ttk.LabelFrame(t, text="Workflow inputs", padding=10)
-        insp.pack(fill="both", expand=True, pady=(10, 0))
+        # --------------------------------------------------------- Advanced
+        ttk.Label(adv, foreground="#666", wraplength=760, justify="left",
+                  text="Every input the selected workflow exposes. You do not need this "
+                       "unless the automatic mapping picked the wrong one."
+                  ).pack(anchor="w", pady=(0, 8))
+        insp = ttk.Frame(adv)
+        insp.pack(fill="both", expand=True)
         self.wf_tree = ttk.Treeview(insp, columns=("node", "input", "value"),
-                                    show="headings", height=10)
+                                    show="headings", height=14)
         for col, w in (("node", 280), ("input", 170), ("value", 460)):
             self.wf_tree.heading(col, text=col.title())
             self.wf_tree.column(col, width=w)
@@ -687,14 +765,76 @@ class App(ttk.Frame):
         self.wf_tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
 
+        self.slot_labels = {proj.WORKFLOW_SLOTS[s]["label"]: s for s in proj.WORKFLOW_SLOTS}
+        self.v_slot = tk.StringVar(value=proj.WORKFLOW_SLOTS["voice"]["label"])
+
+    def _movie_ready_note(self):
+        """Say plainly what the next Make the movie will use.
+
+        The settings live on Setup and the button lives on Movie, so without
+        this you can press it with a voice backend or a picture workflow you did
+        not expect - which is exactly how a take gets made in the wrong voices.
+        """
+        if not hasattr(self, "v_movie_ready"):
+            return
+        p = self.project
+        o = p.get("options") or {}
+        if o.get("voice_backend", "comfyui") == "system":
+            voice = "the voices built into Windows"
+        else:
+            voice = (os.path.basename(proj.workflow_cfg(p, "voice").get("path") or "")
+                     or "no workflow chosen")
+        shot = proj.workflow_cfg(p, "shot")
+        shot_name = os.path.basename(shot.get("path") or "") or "no workflow chosen"
+        locks = ("locks each character's face"
+                 if (shot.get("mapping") or {}).get("image")
+                 else "no reference input, so faces will drift")
+        self.v_movie_ready.set(
+            "Voices:   %s\nPictures: %s  -  %s\nPrefix:   %s"
+            % (voice, shot_name, locks, o.get("prompt_prefix", "") or "(none)"))
+
     def _slot(self):
+        sel = self.slot_tree.selection() if hasattr(self, "slot_tree") else ()
+        if sel and sel[0] in proj.WORKFLOW_SLOTS:
+            return sel[0]
         return self.slot_labels.get(self.v_slot.get(), "voice")
+
+    def _refresh_slot_tree(self):
+        """One visible row per job, so nothing is hidden behind a dropdown.
+
+        Re-entrant on its own: filling the table sets the selection, which fires
+        <<TreeviewSelect>>, which comes back round to here. The flag stops that
+        becoming a spin.
+        """
+        if not hasattr(self, "slot_tree"):
+            return
+        keep = self.slot_tree.selection()
+        self.slot_tree.delete(*self.slot_tree.get_children())
+        for slot in proj.WORKFLOW_SLOTS:
+            cfg = proj.workflow_cfg(self.project, slot)
+            path = cfg.get("path") or ""
+            need = [k for k, _, req in proj.WORKFLOW_SLOTS[slot]["keys"] if req]
+            missing = [k for k in need if not (cfg.get("mapping") or {}).get(k)]
+            if not path:
+                state = "not set"
+            elif missing:
+                state = "needs %s" % ", ".join(missing)
+            else:
+                state = "ready"
+            shown = path if path == getattr(proj, "BUILTIN", "") else os.path.basename(path)
+            self.slot_tree.insert("", "end", iid=slot,
+                                  values=(proj.WORKFLOW_SLOTS[slot]["label"],
+                                          shown or "(none)", state))
+        if keep and self.slot_tree.exists(keep[0]):
+            self.slot_tree.selection_set(keep[0])
+        elif self.slot_tree.get_children():
+            self.slot_tree.selection_set(self.slot_tree.get_children()[0])
 
     def _show_slot(self):
         """Rebuild the mapping rows for the slot the user picked."""
         slot = self._slot()
         cfg = proj.workflow_cfg(self.project, slot)
-        self.v_wf_path.set(cfg.get("path", ""))
+        self.v_wf_path.set(cfg.get("path", "") or "no workflow chosen for this job")
         for child in self.mapbox.winfo_children():
             child.destroy()
         self.map_vars = {}
@@ -732,71 +872,33 @@ class App(ttk.Frame):
                 ready.append(slot)
             else:
                 missing.append(slot)
-        self.v_slot_state.set("ready: %s%s" % (", ".join(ready) or "none",
-                                               ("   missing: " + ", ".join(missing))
+        self.v_slot_state.set("Ready: %s%s" % (", ".join(ready) or "none",
+                                               ("      Still to set up: " + ", ".join(missing))
                                                if missing else ""))
+        self._movie_ready_note()
 
     def _store_mapping(self):
         slot = self._slot()
         cfg = self.project["workflows"].setdefault(slot, {"path": "", "mapping": {}})
         cfg["mapping"] = {k: v.get().strip() for k, v in self.map_vars.items() if v.get().strip()}
-        cfg["path"] = self.v_wf_path.get().strip()
+        # v_wf_path is a label now and carries a human message when nothing is
+        # loaded ("no workflow chosen for this job"). Writing that back here put
+        # that sentence into the project as if it were a filename.
         self.dirty = True
+        self._refresh_slot_tree()
         self._slot_state()
 
     # -------------------------------------------------------------- movie tab
 
     def _build_movie_tab(self):
         t = self.tab_movie
-        top = ttk.LabelFrame(t, text="Output", padding=10)
-        top.pack(fill="x")
-        top.columnconfigure(1, weight=1)
-        self.v_outdir = tk.StringVar()
-        ttk.Label(top, text="Folder:").grid(row=0, column=0, sticky="w")
-        ttk.Entry(top, textvariable=self.v_outdir).grid(row=0, column=1, sticky="ew", padx=6)
-        ttk.Button(top, text="Browse...", command=self.pick_outdir).grid(row=0, column=2)
-
-        opt = ttk.Frame(top)
-        opt.grid(row=1, column=1, sticky="w", padx=6, pady=(8, 0))
-        self.v_gap = tk.StringVar()
-        self.v_reuse = tk.BooleanVar(value=True)
-        ttk.Label(opt, text="Silence between lines (s):").pack(side="left")
-        ttk.Entry(opt, textvariable=self.v_gap, width=6).pack(side="left", padx=6)
-        ttk.Checkbutton(opt, text="Re-use anything that hasn't changed",
-                        variable=self.v_reuse).pack(side="left", padx=12)
-
-        grow = ttk.Frame(top)
-        grow.grid(row=3, column=1, sticky="w", padx=6, pady=(6, 0))
-        self.v_free_gpu = tk.BooleanVar(value=False)
-        ttk.Checkbutton(grow, text="Free the GPU between steps",
-                        variable=self.v_free_gpu).pack(side="left")
-        ttk.Label(grow, foreground="#666",
-                  text="unload the writing model before drawing, and ComfyUI before "
-                       "writing").pack(side="left", padx=8)
-
-        prow = ttk.Frame(top)
-        prow.grid(row=4, column=1, sticky="ew", padx=6, pady=(8, 0))
-        ttk.Label(prow, text="Words in front of every picture prompt:").pack(side="left")
-        self.v_prefix = tk.StringVar()
-        ttk.Entry(prow, textvariable=self.v_prefix, width=34).pack(side="left", padx=6)
-        ttk.Label(prow, foreground="#666",
-                  text="PhotoMaker needs \"a person img\" here; leave empty otherwise"
-                  ).pack(side="left")
-
-        vrow = ttk.Frame(top)
-        vrow.grid(row=2, column=1, sticky="w", padx=6, pady=(8, 0))
-        ttk.Label(vrow, text="Voices from:").pack(side="left")
-        self.v_backend = tk.StringVar()
-        self.backend_labels = {
-            "A ComfyUI text-to-speech workflow": "comfyui",
-            "The voices built into Windows": "system",
-        }
-        cb = ttk.Combobox(vrow, textvariable=self.v_backend, state="readonly", width=34,
-                          values=list(self.backend_labels))
-        cb.pack(side="left", padx=6)
-        cb.bind("<<ComboboxSelected>>", lambda e: self._backend_changed())
-        self.v_backend_note = tk.StringVar(value="")
-        ttk.Label(vrow, textvariable=self.v_backend_note, foreground="#666").pack(side="left")
+        head = ttk.Frame(t)
+        head.pack(fill="x")
+        self.v_movie_ready = tk.StringVar(value="")
+        ttk.Label(head, textvariable=self.v_movie_ready, justify="left",
+                  foreground="#444").pack(side="left")
+        ttk.Button(head, text="Change any of this on the Setup tab",
+                   command=lambda: self.nb.select(self.tab_wf)).pack(side="right")
 
         ctl = ttk.Frame(t)
         ctl.pack(fill="x", pady=(10, 0))
@@ -853,6 +955,7 @@ class App(ttk.Frame):
         self.v_reuse.set(bool(o.get("reuse_unchanged", True)))
         self.v_free_gpu.set(bool(o.get("free_gpu", False)))
         self.v_prefix.set(o.get("prompt_prefix", ""))
+        self._movie_ready_note()
         backend = o.get("voice_backend", "comfyui")
         for label, key in self.backend_labels.items():
             if key == backend:
@@ -877,6 +980,7 @@ class App(ttk.Frame):
                 except Exception:
                     pass
         self.v_slot.set(proj.WORKFLOW_SLOTS["voice"]["label"])
+        self._refresh_slot_tree()
         self._show_slot()
         self._refresh_cast()
         self._retitle()
@@ -894,6 +998,7 @@ class App(ttk.Frame):
         o["reuse_unchanged"] = bool(self.v_reuse.get())
         o["free_gpu"] = bool(self.v_free_gpu.get())
         o["prompt_prefix"] = self.v_prefix.get().strip()
+        self._movie_ready_note()
         o["voice_backend"] = self.backend_labels.get(self.v_backend.get(), "comfyui")
         o["output_dir"] = self.v_outdir.get().strip()
         o["max_actors"] = max(1, min(8, _int(self.v_max_actors.get(), 5)))
@@ -1724,6 +1829,7 @@ class App(ttk.Frame):
         self.v_wf_path.set(path)
         if not (cfg.get("mapping") or {}):
             cfg["mapping"] = proj.guess_mapping(wf, slot)
+        self._refresh_slot_tree()
         self._show_slot()
         self.dirty = True
         if not quiet:

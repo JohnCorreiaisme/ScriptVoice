@@ -1543,6 +1543,7 @@ under another character's name.
 
 Return a JSON array, one element per line, in order:
 {"n": <line number>, "shot": "shot size and framing, what is in frame, the action",
+ "cast": ["NAMES of everyone visible in this shot, closest to camera first"],
  "subject": "NAME of the one character the camera is on",
  "setting": "where this happens - the heading's location",
  "wardrobe": {"NAME": "garments only"},
@@ -1551,6 +1552,10 @@ Return a JSON array, one element per line, in order:
 "subject" is who we SEE, which is often not who is speaking. A reaction shot of
 the listener during someone else's line is normal and good - just say whose face
 is in frame. Use a name from the cast, exactly as spelled there.
+
+"cast" is everyone visible, and it is usually just one person. Two or more means
+a wider shot - say so in "shot", because a close-up cannot hold two faces. Put
+whoever is nearest the camera first.
 Describe the visible world only. Never name a character's appearance - refer to them
 by NAME, the renderer already knows what they look like."""
 
@@ -1850,6 +1855,33 @@ def shot_text(shot):
             or str((shot or {}).get("shot", "")).strip())
 
 
+def shot_people(shot, cue, cast_names=()):
+    """Everyone visible in this shot, nearest the camera first.
+
+    The user's own list wins, then the planner's, then whoever the shot text
+    names, and failing all of that the one person shot_subject settles on.
+    """
+    known = [str(n).strip().upper() for n in cast_names if str(n).strip()]
+    for key in ("cast_override", "cast"):
+        picked = [str(n).strip().upper() for n in ((shot or {}).get(key) or [])]
+        picked = [n for n in picked if n in known]
+        if picked:
+            out = []
+            for n in picked:                    # keep order, drop repeats
+                if n not in out:
+                    out.append(n)
+            return out
+    named, text = [], shot_text(shot)
+    for n in sorted(known, key=len, reverse=True):
+        m = re.search(r"\b%s\b" % re.escape(n), text, re.I) if text else None
+        if m and not any(n in other for other in named):
+            named.append((m.start(), n))
+    if named:
+        return [n for _, n in sorted(named)]
+    one = shot_subject(shot, cue, cast_names)
+    return [one] if one else []
+
+
 def shot_subject(shot, cue, cast_names=()):
     """Whose face this shot is of. The speaker is only the last resort.
 
@@ -1857,6 +1889,14 @@ def shot_subject(shot, cue, cast_names=()):
     member the shot description actually names, then the speaker.
     """
     names = [str(n).strip().upper() for n in cast_names if str(n).strip()]
+    want = str((shot or {}).get("subject_override", "")).strip().upper()
+    if want and want in names:
+        return want                     # the user pinned this one
+    for key in ("cast_override", "cast"):
+        picked = [str(n).strip().upper() for n in ((shot or {}).get(key) or [])]
+        picked = [n for n in picked if n in names]
+        if picked:
+            return picked[0]            # nearest the camera holds the face
     for key in ("subject_override", "subject"):
         want = str((shot or {}).get(key, "")).strip().upper()
         if want and want in names:
@@ -1972,6 +2012,8 @@ def plan_shots(llm, premise, actors, cues, script="", cancel=None):
             shots[n] = {
                 "shot": str(item.get("shot", "")).strip(),
                 "subject": str(item.get("subject", "")).strip().upper(),
+                "cast": [str(x).strip().upper()
+                         for x in (item.get("cast") or []) if str(x).strip()],
                 "setting": str(item.get("setting", "")).strip(),
                 # kept as-is: a dict keyed by name, or the sentence a smaller
                 # model returns instead. wardrobe_for() sorts out which.
@@ -2026,18 +2068,31 @@ def shot_prompt(actor_map, cue, shot, style="cinematic film still, 35mm, natural
     """The prompt for one movie shot, with the speaker's fixed look folded in."""
     subject = shot_subject(shot, cue, actor_map.keys())
     actor = actor_map.get(subject) or {}
+    people = shot_people(shot, cue, actor_map.keys())
     # The scene supplies the clothes when it has an opinion, so the character's
     # one fixed outfit does not follow them onto the lake.
     scene_dress = wardrobe_for(shot, subject, actor_map.keys())
     who = (look_prompt(actor, style="", wardrobe=not scene_dress)
            if actor else subject.title())
+    # Anyone else in frame is described too, or the renderer invents them. Their
+    # faces are not locked - only one identity can be - but a wide shot is where
+    # extra people appear, and there a description is enough.
+    others = []
+    for name in people[1:3]:
+        rec = actor_map.get(name)
+        if not rec:
+            continue
+        bits = look_prompt(rec, style="", wardrobe=False)[:120]
+        dress = wardrobe_for(shot, name, actor_map.keys()) or rec.get("wardrobe", "")
+        others.append("with %s: %s%s" % (name.title(), bits,
+                                         (", wearing " + dress) if dress else ""))
     # The scene heading comes from the script, so it outranks whatever the model
     # decided the setting was.
     where = scene_phrase(shot.get("scene", "")) or shot.get("setting", "")
     dress = scene_dress or actor.get("wardrobe", "")
     parts = [shot_text(shot) or "medium shot of %s speaking" % subject.title(),
              ("in " + where) if where else "",
-             who, ("wearing " + dress) if dress else "",
+             who, ("wearing " + dress) if dress else ""] + others + [
              shot.get("mood", ""), style]
     return with_prefix(", ".join(p.strip(" ,") for p in parts if p and p.strip()), prefix)
 
@@ -3917,7 +3972,7 @@ def plan_shots_batched(llm, project, cues, cancel=None, log=None, batch=SHOT_BAT
             shot["line"] = cues[real].text
             shot["scene"] = heads[real]          # from the script, not the model
             was = shots.get(str(real)) or {}
-            for kept in ("subject_override", "shot_override"):
+            for kept in ("subject_override", "shot_override", "cast_override"):
                 # The user's own choices for this shot. Replanning the AI's
                 # description must not quietly throw them away.
                 if was.get(kept):
@@ -4945,17 +5000,28 @@ class App(ttk.Frame):
         self.board_canvas.pack()
         subj = ttk.LabelFrame(right, text="Who is in this shot", padding=8)
         subj.pack(fill="x", pady=(8, 0))
-        self.v_board_subject = tk.StringVar()
-        self.cb_board_subject = ttk.Combobox(subj, textvariable=self.v_board_subject,
-                                             state="readonly", width=24)
-        self.cb_board_subject.pack(side="left")
-        ttk.Button(subj, text="Use this face",
-                   command=self.set_shot_subject).pack(side="left", padx=6)
-        ttk.Button(subj, text="Use it and redraw",
-                   command=self.set_shot_subject_and_redraw).pack(side="left")
+        listrow = ttk.Frame(subj)
+        listrow.pack(fill="x")
+        self.lb_board_cast = tk.Listbox(listrow, selectmode="extended", height=5,
+                                        exportselection=False)
+        self.lb_board_cast.pack(side="left", fill="x", expand=True)
+        lsb = ttk.Scrollbar(listrow, command=self.lb_board_cast.yview)
+        self.lb_board_cast.configure(yscrollcommand=lsb.set)
+        lsb.pack(side="right", fill="y")
+        self.v_board_face = tk.StringVar(value="")
+        ttk.Label(subj, textvariable=self.v_board_face,
+                  foreground="#1a4f9c").pack(anchor="w", pady=(4, 0))
+        srow = ttk.Frame(subj)
+        srow.pack(fill="x", pady=(6, 0))
+        ttk.Button(srow, text="Use these people",
+                   command=self.set_shot_subject).pack(side="left")
+        ttk.Button(srow, text="Use them and redraw",
+                   command=self.set_shot_subject_and_redraw).pack(side="left", padx=6)
         ttk.Label(right, foreground="#666", wraplength=380, justify="left",
-                  text="The camera is often on the listener, not the speaker. This is "
-                       "whose face gets drawn."
+                  text="Pick everyone visible - Ctrl-click for more than one. The first "
+                       "one picked holds the locked face; the rest are described in the "
+                       "prompt. Only one face can be locked, so two or more people means "
+                       "a wider shot, where that does not show."
                   ).pack(anchor="w", pady=(4, 0))
 
         ovr = ttk.LabelFrame(right, text="Describe this shot yourself", padding=8)
@@ -4990,7 +5056,10 @@ class App(ttk.Frame):
         for c in self.cues:
             shot = casting.shot_text(shots.get(str(c.index)) or {})
             rec = (shots.get(str(c.index)) or {})
-            who = casting.shot_subject(rec, c, (self.project.get("characters") or {}).keys())
+            crowd = casting.shot_people(rec, c, (self.project.get("characters") or {}).keys())
+            who = crowd[0] if crowd else ""
+            if len(crowd) > 1:
+                who = "%s +%d" % (who, len(crowd) - 1)
             self.board_tree.insert("", "end", iid=str(c.index),
                                    values=(c.speaker, who, _short(c.text, 90),
                                            _short(shot, 80),
@@ -5027,8 +5096,19 @@ class App(ttk.Frame):
             cue = self.cues[index]
             shot = (self.project.get("shots") or {}).get(str(index)) or {}
             names = [a["name"] for a in proj.cast(self.project)]
-            self.cb_board_subject["values"] = names
-            self.v_board_subject.set(casting.shot_subject(shot, cue, names))
+            self.lb_board_cast.delete(0, "end")
+            for n in names:
+                self.lb_board_cast.insert("end", n)
+            people = casting.shot_people(shot, cue, names)
+            for n in people:
+                if n in names:
+                    self.lb_board_cast.selection_set(names.index(n))
+            if people:
+                self.lb_board_cast.see(names.index(people[0]))
+            face = casting.shot_subject(shot, cue, names)
+            self.v_board_face.set(
+                ("Locked face: %s" % face) + ("      also in frame: %s"
+                                              % ", ".join(people[1:]) if len(people) > 1 else ""))
             self.shot_text_box.delete("1.0", "end")
             self.shot_text_box.insert("1.0", shot.get("shot_override", ""))
             self.v_board_caption.set(
@@ -5070,20 +5150,26 @@ class App(ttk.Frame):
         if not sel:
             messagebox.showinfo(APP, "Pick a shot in the list first.")
             return False
-        who = self.v_board_subject.get().strip().upper()
-        if not who:
+        names = [a["name"] for a in proj.cast(self.project)]
+        picked = [names[i] for i in self.lb_board_cast.curselection() if i < len(names)]
+        if not picked:
+            messagebox.showinfo(APP, "Pick at least one person for this shot.")
             return False
         index = int(sel[0])
         shots = self.project.setdefault("shots", {})
         shot = shots.setdefault(str(index), {})
-        shot["subject_override"] = who
+        shot["cast_override"] = picked
+        shot["subject_override"] = picked[0]
+        who = picked[0]
         if index < len(self.cues):
             shot.setdefault("line", self.cues[index].text)
         self.dirty = True
         self._refresh_board()
         self.board_tree.selection_set(sel[0])
         self.board_tree.see(sel[0])
-        self.set_status("Shot %d will be drawn as %s." % (index + 1, who))
+        self.set_status("Shot %d: %s%s." % (
+            index + 1, who,
+            (" with " + ", ".join(picked[1:])) if len(picked) > 1 else " alone"))
         return True
 
     def set_shot_subject_and_redraw(self):

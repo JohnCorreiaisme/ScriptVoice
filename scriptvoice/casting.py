@@ -106,6 +106,7 @@ under another character's name.
 
 Return a JSON array, one element per line, in order:
 {"n": <line number>, "shot": "shot size and framing, what is in frame, the action",
+ "cast": ["NAMES of everyone visible in this shot, closest to camera first"],
  "subject": "NAME of the one character the camera is on",
  "setting": "where this happens - the heading's location",
  "wardrobe": {"NAME": "garments only"},
@@ -114,6 +115,10 @@ Return a JSON array, one element per line, in order:
 "subject" is who we SEE, which is often not who is speaking. A reaction shot of
 the listener during someone else's line is normal and good - just say whose face
 is in frame. Use a name from the cast, exactly as spelled there.
+
+"cast" is everyone visible, and it is usually just one person. Two or more means
+a wider shot - say so in "shot", because a close-up cannot hold two faces. Put
+whoever is nearest the camera first.
 Describe the visible world only. Never name a character's appearance - refer to them
 by NAME, the renderer already knows what they look like."""
 
@@ -413,6 +418,33 @@ def shot_text(shot):
             or str((shot or {}).get("shot", "")).strip())
 
 
+def shot_people(shot, cue, cast_names=()):
+    """Everyone visible in this shot, nearest the camera first.
+
+    The user's own list wins, then the planner's, then whoever the shot text
+    names, and failing all of that the one person shot_subject settles on.
+    """
+    known = [str(n).strip().upper() for n in cast_names if str(n).strip()]
+    for key in ("cast_override", "cast"):
+        picked = [str(n).strip().upper() for n in ((shot or {}).get(key) or [])]
+        picked = [n for n in picked if n in known]
+        if picked:
+            out = []
+            for n in picked:                    # keep order, drop repeats
+                if n not in out:
+                    out.append(n)
+            return out
+    named, text = [], shot_text(shot)
+    for n in sorted(known, key=len, reverse=True):
+        m = re.search(r"\b%s\b" % re.escape(n), text, re.I) if text else None
+        if m and not any(n in other for other in named):
+            named.append((m.start(), n))
+    if named:
+        return [n for _, n in sorted(named)]
+    one = shot_subject(shot, cue, cast_names)
+    return [one] if one else []
+
+
 def shot_subject(shot, cue, cast_names=()):
     """Whose face this shot is of. The speaker is only the last resort.
 
@@ -420,6 +452,14 @@ def shot_subject(shot, cue, cast_names=()):
     member the shot description actually names, then the speaker.
     """
     names = [str(n).strip().upper() for n in cast_names if str(n).strip()]
+    want = str((shot or {}).get("subject_override", "")).strip().upper()
+    if want and want in names:
+        return want                     # the user pinned this one
+    for key in ("cast_override", "cast"):
+        picked = [str(n).strip().upper() for n in ((shot or {}).get(key) or [])]
+        picked = [n for n in picked if n in names]
+        if picked:
+            return picked[0]            # nearest the camera holds the face
     for key in ("subject_override", "subject"):
         want = str((shot or {}).get(key, "")).strip().upper()
         if want and want in names:
@@ -535,6 +575,8 @@ def plan_shots(llm, premise, actors, cues, script="", cancel=None):
             shots[n] = {
                 "shot": str(item.get("shot", "")).strip(),
                 "subject": str(item.get("subject", "")).strip().upper(),
+                "cast": [str(x).strip().upper()
+                         for x in (item.get("cast") or []) if str(x).strip()],
                 "setting": str(item.get("setting", "")).strip(),
                 # kept as-is: a dict keyed by name, or the sentence a smaller
                 # model returns instead. wardrobe_for() sorts out which.
@@ -589,18 +631,31 @@ def shot_prompt(actor_map, cue, shot, style="cinematic film still, 35mm, natural
     """The prompt for one movie shot, with the speaker's fixed look folded in."""
     subject = shot_subject(shot, cue, actor_map.keys())
     actor = actor_map.get(subject) or {}
+    people = shot_people(shot, cue, actor_map.keys())
     # The scene supplies the clothes when it has an opinion, so the character's
     # one fixed outfit does not follow them onto the lake.
     scene_dress = wardrobe_for(shot, subject, actor_map.keys())
     who = (look_prompt(actor, style="", wardrobe=not scene_dress)
            if actor else subject.title())
+    # Anyone else in frame is described too, or the renderer invents them. Their
+    # faces are not locked - only one identity can be - but a wide shot is where
+    # extra people appear, and there a description is enough.
+    others = []
+    for name in people[1:3]:
+        rec = actor_map.get(name)
+        if not rec:
+            continue
+        bits = look_prompt(rec, style="", wardrobe=False)[:120]
+        dress = wardrobe_for(shot, name, actor_map.keys()) or rec.get("wardrobe", "")
+        others.append("with %s: %s%s" % (name.title(), bits,
+                                         (", wearing " + dress) if dress else ""))
     # The scene heading comes from the script, so it outranks whatever the model
     # decided the setting was.
     where = scene_phrase(shot.get("scene", "")) or shot.get("setting", "")
     dress = scene_dress or actor.get("wardrobe", "")
     parts = [shot_text(shot) or "medium shot of %s speaking" % subject.title(),
              ("in " + where) if where else "",
-             who, ("wearing " + dress) if dress else "",
+             who, ("wearing " + dress) if dress else ""] + others + [
              shot.get("mood", ""), style]
     return with_prefix(", ".join(p.strip(" ,") for p in parts if p and p.strip()), prefix)
 

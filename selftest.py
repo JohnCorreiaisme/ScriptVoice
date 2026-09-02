@@ -1565,6 +1565,80 @@ def suite(sv, check):
     check("a new character has no gender chosen, so nothing is forced",
           ch["voice_gender"] == "")
 
+    # -------------------------------------------- more than one person in frame
+    check.section("[5o] two characters in one shot")
+    sp = sv.casting.shot_people
+    ppl = ["MIKE", "PLANT MANAGER", "VICTOR"]
+    pmap = {n: dict(sv.project.new_character(n), appearance=a, wardrobe=w)
+            for n, a, w in (("MIKE", "lean, grey stubble", "worn jacket"),
+                            ("PLANT MANAGER", "stocky, hi-vis vest", "hard hat"),
+                            ("VICTOR", "silver hair", "polo shirt"))}
+    mcue = sv.script_parser.parse("MIKE: Look at it." + chr(10))[0]
+
+    two = {"shot": "wide shot on the railing above the factory floor",
+           "cast": ["MIKE", "PLANT MANAGER"], "scene": "INT. FACTORY - DAY"}
+    check("everyone the planner listed is in frame",
+          sp(two, mcue, ppl) == ["MIKE", "PLANT MANAGER"], str(sp(two, mcue, ppl)))
+    check("the first one listed holds the locked face",
+          sv.casting.shot_subject(two, mcue, ppl) == "MIKE")
+    p2 = sv.casting.shot_prompt(pmap, mcue, two)
+    check("the second person is described, not left to invention",
+          "with Plant Manager" in p2 and "hi-vis vest" in p2, p2[:150])
+    check("and the first is still the one drawn from",
+          "lean, grey stubble" in p2, p2[:150])
+    check("their clothes come along too", "hard hat" in p2, p2[:170])
+
+    check("a name that is not in the cast is dropped from the list",
+          sp({"cast": ["MIKE", "NOBODY"]}, mcue, ppl) == ["MIKE"],
+          str(sp({"cast": ["MIKE", "NOBODY"]}, mcue, ppl)))
+    check("a repeated name appears once",
+          sp({"cast": ["MIKE", "MIKE"]}, mcue, ppl) == ["MIKE"])
+    check("the user's list beats the planner's",
+          sp({"cast": ["MIKE"], "cast_override": ["VICTOR", "MIKE"]}, mcue, ppl)
+          == ["VICTOR", "MIKE"])
+    check("and it moves the locked face with it",
+          sv.casting.shot_subject(
+              {"cast": ["MIKE"], "cast_override": ["VICTOR", "MIKE"]}, mcue, ppl) == "VICTOR")
+    check("a pinned face still outranks the list",
+          sv.casting.shot_subject(
+              {"cast_override": ["VICTOR", "MIKE"], "subject_override": "MIKE"},
+              mcue, ppl) == "MIKE")
+    check("with no list at all, the shot text is read",
+          sp({"shot": "VICTOR turns as MIKE climbs the steps"}, mcue, ppl)
+          == ["VICTOR", "MIKE"],
+          str(sp({"shot": "VICTOR turns as MIKE climbs the steps"}, mcue, ppl)))
+    check("and failing that it falls back to the speaker",
+          sp({"shot": "a wide empty room"}, mcue, ppl) == ["MIKE"])
+    check("a one-person shot is unchanged - no 'with' clause appears",
+          "with " not in sv.casting.shot_prompt(pmap, mcue, {"shot": "close-up",
+                                                             "cast": ["MIKE"]}),
+          sv.casting.shot_prompt(pmap, mcue, {"shot": "close-up", "cast": ["MIKE"]})[:90])
+    crowd = {"shot": "the whole room", "cast": ["MIKE", "PLANT MANAGER", "VICTOR"]}
+    pc = sv.casting.shot_prompt(pmap, mcue, crowd)
+    check("a crowd is capped so the prompt does not run away",
+          pc.count("with ") <= 2, "%d 'with' clauses" % pc.count("with "))
+
+    # only one identity can be locked, so only one reference is ever uploaded
+    class _R1(object):
+        def __init__(self):
+            self.uploaded = []
+
+        def has(self, key):
+            return key == "image"
+
+        def upload(self, path):
+            self.uploaded.append(path)
+            return "up_" + os.path.basename(path)
+
+    port = os.path.join(work, "crowd_ref.png")
+    make_png(port)
+    pmap["MIKE"]["portrait"] = port
+    rr = _R1()
+    vals, _, _, subj, ref = sv.pipeline.shot_values(rr, pmap, mcue, two, 0)
+    check("a two-person shot still uploads exactly one reference face",
+          len(rr.uploaded) == 1, str(rr.uploaded))
+    check("and it is the first person's", subj == "MIKE" and ref == port, "%s %s" % (subj, ref))
+
     # --------------------------------------------------------- regeneration
     check.section("[6] the regenerate buttons")
     before_voice = dict(p["characters"]["MAYA"])

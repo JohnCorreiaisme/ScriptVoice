@@ -455,17 +455,28 @@ class App(ttk.Frame):
         self.board_canvas.pack()
         subj = ttk.LabelFrame(right, text="Who is in this shot", padding=8)
         subj.pack(fill="x", pady=(8, 0))
-        self.v_board_subject = tk.StringVar()
-        self.cb_board_subject = ttk.Combobox(subj, textvariable=self.v_board_subject,
-                                             state="readonly", width=24)
-        self.cb_board_subject.pack(side="left")
-        ttk.Button(subj, text="Use this face",
-                   command=self.set_shot_subject).pack(side="left", padx=6)
-        ttk.Button(subj, text="Use it and redraw",
-                   command=self.set_shot_subject_and_redraw).pack(side="left")
+        listrow = ttk.Frame(subj)
+        listrow.pack(fill="x")
+        self.lb_board_cast = tk.Listbox(listrow, selectmode="extended", height=5,
+                                        exportselection=False)
+        self.lb_board_cast.pack(side="left", fill="x", expand=True)
+        lsb = ttk.Scrollbar(listrow, command=self.lb_board_cast.yview)
+        self.lb_board_cast.configure(yscrollcommand=lsb.set)
+        lsb.pack(side="right", fill="y")
+        self.v_board_face = tk.StringVar(value="")
+        ttk.Label(subj, textvariable=self.v_board_face,
+                  foreground="#1a4f9c").pack(anchor="w", pady=(4, 0))
+        srow = ttk.Frame(subj)
+        srow.pack(fill="x", pady=(6, 0))
+        ttk.Button(srow, text="Use these people",
+                   command=self.set_shot_subject).pack(side="left")
+        ttk.Button(srow, text="Use them and redraw",
+                   command=self.set_shot_subject_and_redraw).pack(side="left", padx=6)
         ttk.Label(right, foreground="#666", wraplength=380, justify="left",
-                  text="The camera is often on the listener, not the speaker. This is "
-                       "whose face gets drawn."
+                  text="Pick everyone visible - Ctrl-click for more than one. The first "
+                       "one picked holds the locked face; the rest are described in the "
+                       "prompt. Only one face can be locked, so two or more people means "
+                       "a wider shot, where that does not show."
                   ).pack(anchor="w", pady=(4, 0))
 
         ovr = ttk.LabelFrame(right, text="Describe this shot yourself", padding=8)
@@ -500,7 +511,10 @@ class App(ttk.Frame):
         for c in self.cues:
             shot = casting.shot_text(shots.get(str(c.index)) or {})
             rec = (shots.get(str(c.index)) or {})
-            who = casting.shot_subject(rec, c, (self.project.get("characters") or {}).keys())
+            crowd = casting.shot_people(rec, c, (self.project.get("characters") or {}).keys())
+            who = crowd[0] if crowd else ""
+            if len(crowd) > 1:
+                who = "%s +%d" % (who, len(crowd) - 1)
             self.board_tree.insert("", "end", iid=str(c.index),
                                    values=(c.speaker, who, _short(c.text, 90),
                                            _short(shot, 80),
@@ -537,8 +551,19 @@ class App(ttk.Frame):
             cue = self.cues[index]
             shot = (self.project.get("shots") or {}).get(str(index)) or {}
             names = [a["name"] for a in proj.cast(self.project)]
-            self.cb_board_subject["values"] = names
-            self.v_board_subject.set(casting.shot_subject(shot, cue, names))
+            self.lb_board_cast.delete(0, "end")
+            for n in names:
+                self.lb_board_cast.insert("end", n)
+            people = casting.shot_people(shot, cue, names)
+            for n in people:
+                if n in names:
+                    self.lb_board_cast.selection_set(names.index(n))
+            if people:
+                self.lb_board_cast.see(names.index(people[0]))
+            face = casting.shot_subject(shot, cue, names)
+            self.v_board_face.set(
+                ("Locked face: %s" % face) + ("      also in frame: %s"
+                                              % ", ".join(people[1:]) if len(people) > 1 else ""))
             self.shot_text_box.delete("1.0", "end")
             self.shot_text_box.insert("1.0", shot.get("shot_override", ""))
             self.v_board_caption.set(
@@ -580,20 +605,26 @@ class App(ttk.Frame):
         if not sel:
             messagebox.showinfo(APP, "Pick a shot in the list first.")
             return False
-        who = self.v_board_subject.get().strip().upper()
-        if not who:
+        names = [a["name"] for a in proj.cast(self.project)]
+        picked = [names[i] for i in self.lb_board_cast.curselection() if i < len(names)]
+        if not picked:
+            messagebox.showinfo(APP, "Pick at least one person for this shot.")
             return False
         index = int(sel[0])
         shots = self.project.setdefault("shots", {})
         shot = shots.setdefault(str(index), {})
-        shot["subject_override"] = who
+        shot["cast_override"] = picked
+        shot["subject_override"] = picked[0]
+        who = picked[0]
         if index < len(self.cues):
             shot.setdefault("line", self.cues[index].text)
         self.dirty = True
         self._refresh_board()
         self.board_tree.selection_set(sel[0])
         self.board_tree.see(sel[0])
-        self.set_status("Shot %d will be drawn as %s." % (index + 1, who))
+        self.set_status("Shot %d: %s%s." % (
+            index + 1, who,
+            (" with " + ", ".join(picked[1:])) if len(picked) > 1 else " alone"))
         return True
 
     def set_shot_subject_and_redraw(self):

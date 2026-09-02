@@ -36,7 +36,9 @@ Six tabs, in the order you'd actually work:
 4. **Storyboard** — one image per line of dialogue, drawn from the script's own scene headings,
    scene-appropriate wardrobe, and the reference face of whoever is in frame — which is often the
    listener, not the speaker. Per shot you can pick that face yourself and write your own shot
-   description; both survive a replan.
+   description; all three survive a replan. A shot can hold several characters: everyone
+   picked shapes the prompt, and the first of them holds the locked face - only one identity
+   can be locked, but two people in frame means a wide shot, where that does not show.
 5. **Movie** — records every line, cuts the stills against the audio, writes an `.mp4` and an EDL.
 6. **Setup** — three pages. *Everyday*: ComfyUI's address, where voices come from, the
    words in front of every picture prompt, where files go, and freeing the GPU between
@@ -59,7 +61,7 @@ picture workflow baked in at build time. Everything else in this repository is s
 
 ## What has actually been tested
 
-**Automated: 731 checks** (`python selftest.py`) — run twice, once against the package and once
+**Automated: 789 checks** (`python selftest.py`) — run twice, once against the package and once
 against the flattened single file, so the two cannot drift apart. They use a stub ComfyUI and a
 stub OpenAI-compatible model server, so they need no GPU and no network.
 
@@ -135,7 +137,7 @@ Nothing else. No accounts, no keys, no network calls beyond `127.0.0.1`.
 ScriptVoice.py      the whole program in one file (generated)
 build_single.py     flattens scriptvoice/ into it; refuses to build on a name collision
 run.py              runs the package
-selftest.py         731 checks, against both the package and the single file
+selftest.py         789 checks, against both the package and the single file
 gui_selftest.py     73 widget checks against the real window
 scriptvoice/        audio, comfy, casting, llm, movie, pipeline, project, render,
                     script_parser, speech, visuals, widgets, worker, gui

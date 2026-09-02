@@ -465,7 +465,7 @@ def plan_shots_batched(llm, project, cues, cancel=None, log=None, batch=SHOT_BAT
             shot["line"] = cues[real].text
             shot["scene"] = heads[real]          # from the script, not the model
             was = shots.get(str(real)) or {}
-            for kept in ("subject_override", "shot_override"):
+            for kept in ("subject_override", "shot_override", "cast_override"):
                 # The user's own choices for this shot. Replanning the AI's
                 # description must not quietly throw them away.
                 if was.get(kept):

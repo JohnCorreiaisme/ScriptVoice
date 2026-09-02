@@ -408,6 +408,78 @@ ok("and which picture workflow", "Pictures:" in note, note[:60])
 ok("and warns when faces will not be locked",
    "drift" in note or "locks" in note, note)
 
+# --- nothing you have to type into may sit below the window ---------------
+root.deiconify()
+root.geometry("1240x820")
+root.update()
+
+
+def fully_visible(widget):
+    """True when the whole widget is inside the window, not clipped by it."""
+    if not widget.winfo_ismapped():
+        return False
+    top, bottom = widget.winfo_rooty(), widget.winfo_rooty() + widget.winfo_height()
+    left, rightx = widget.winfo_rootx(), widget.winfo_rootx() + widget.winfo_width()
+    return (top >= root.winfo_rooty()
+            and bottom <= root.winfo_rooty() + root.winfo_height()
+            and left >= root.winfo_rootx()
+            and rightx <= root.winfo_rootx() + root.winfo_width())
+
+
+app.nb.select(app.tab_board)
+app.board_tree.selection_set(app.board_tree.get_children()[0]
+                             if app.board_tree.get_children() else ())
+root.update()
+pages = [app.board_side.tab(i, "text").strip()
+         for i in range(app.board_side.index("end"))]
+ok("the storyboard panels are tabs, so none can be clipped away",
+   pages == ["Describe the shot", "Who is in it"], str(pages))
+
+app.board_side.select(0)
+root.update()
+ok("the shot description box is fully on screen", fully_visible(app.shot_text_box),
+   "y %d..%d, window ends %d" % (app.shot_text_box.winfo_rooty(),
+                                 app.shot_text_box.winfo_rooty() + app.shot_text_box.winfo_height(),
+                                 root.winfo_rooty() + root.winfo_height()))
+save_btns = named(app.tab_board, "Save this shot")
+ok("and its Save button too", save_btns and fully_visible(save_btns[0]))
+
+app.board_side.select(1)
+root.update()
+ok("the who-is-in-it list is fully on screen", fully_visible(app.lb_board_cast))
+use_btns = named(app.tab_board, "Use these people")
+ok("and its button too", use_btns and fully_visible(use_btns[0]))
+clr = named(app.tab_board, "Clear")
+ok("there is a Clear button for a pinned cast", len(clr) >= 1, str(len(clr)))
+ok("and it is on screen", clr and fully_visible(clr[0]))
+
+# pinning and then clearing must leave nothing behind
+rows = app.board_tree.get_children()
+if rows:
+    app.board_tree.selection_set(rows[0])
+    root.update()
+    idx = str(int(rows[0]))
+    shot = app.project.setdefault("shots", {}).setdefault(idx, {})
+    shot["cast_override"] = ["MAYA"]
+    shot["subject_override"] = "MAYA"
+    app.clear_shot_subject()
+    after = (app.project.get("shots") or {}).get(idx, {})
+    ok("Clear removes the pinned cast",
+       "cast_override" not in after and "subject_override" not in after, str(sorted(after)))
+    ok("and leaves the rest of the shot alone", "line" in after or not after, str(sorted(after)))
+    ok("clearing a shot with nothing pinned is harmless",
+       app.clear_shot_subject() is not None)
+
+# every text box in the app, on the tab it belongs to
+app.nb.select(app.tab_cast)
+app.select_actor("MAYA")
+for i, box in ((0, app.look_text), (2, app.who_text)):
+    app.cast_side.select(i)
+    root.update()
+    ok("cast text box %d is fully on screen" % i, fully_visible(box),
+       "bottom %d vs %d" % (box.winfo_rooty() + box.winfo_height(),
+                            root.winfo_rooty() + root.winfo_height()))
+
 root.destroy()
 print("\n%d failed" % len(fails))
 sys.exit(1 if fails else 0)

@@ -450,11 +450,37 @@ class App(ttk.Frame):
         panes.add(left, weight=3)
 
         right = ttk.Frame(panes, padding=(10, 0, 0, 0))
-        self.board_canvas = tk.Canvas(right, width=380, height=430, background="#2c2f36",
+        # A smaller preview and tabbed panels below it. Stacked, these ran past
+        # the bottom of the window and the description box could not be reached.
+        self.board_canvas = tk.Canvas(right, width=330, height=300, background="#2c2f36",
                                       highlightthickness=0)
         self.board_canvas.pack()
-        subj = ttk.LabelFrame(right, text="Who is in this shot", padding=8)
-        subj.pack(fill="x", pady=(8, 0))
+        self.v_board_caption = tk.StringVar(value="")
+        ttk.Label(right, textvariable=self.v_board_caption, wraplength=340,
+                  justify="left", foreground="#333").pack(anchor="w", pady=(6, 0))
+
+        self.board_side = ttk.Notebook(right)
+        self.board_side.pack(fill="both", expand=True, pady=(8, 0))
+
+        ovr = ttk.Frame(self.board_side, padding=8)
+        self.board_side.add(ovr, text="  Describe the shot  ")
+        self.shot_text_box = tk.Text(ovr, height=5, wrap="word", font=("Segoe UI", 9))
+        self.shot_text_box.pack(fill="x")
+        ttk.Label(ovr, foreground="#666", wraplength=330, justify="left",
+                  text="Replaces the AI's description for this shot, and is kept when the "
+                       "storyboard is planned again. Empty it to hand the shot back. Say "
+                       "how many people and how wide - names alone do not tell the "
+                       "renderer to draw two bodies."
+                  ).pack(anchor="w", pady=(4, 0))
+        orow = ttk.Frame(ovr)
+        orow.pack(fill="x", pady=(6, 0))
+        ttk.Button(orow, text="Save this shot",
+                   command=self.save_shot_text).pack(side="left")
+        ttk.Button(orow, text="Save and redraw",
+                   command=self.save_shot_text_and_redraw).pack(side="left", padx=6)
+
+        subj = ttk.Frame(self.board_side, padding=8)
+        self.board_side.add(subj, text="  Who is in it  ")
         listrow = ttk.Frame(subj)
         listrow.pack(fill="x")
         self.lb_board_cast = tk.Listbox(listrow, selectmode="extended", height=5,
@@ -466,38 +492,19 @@ class App(ttk.Frame):
         self.v_board_face = tk.StringVar(value="")
         ttk.Label(subj, textvariable=self.v_board_face,
                   foreground="#1a4f9c").pack(anchor="w", pady=(4, 0))
+        ttk.Label(subj, foreground="#666", wraplength=330, justify="left",
+                  text="Ctrl-click for more than one. The first pick holds the locked "
+                       "face; the rest are described in the prompt."
+                  ).pack(anchor="w", pady=(2, 0))
         srow = ttk.Frame(subj)
         srow.pack(fill="x", pady=(6, 0))
         ttk.Button(srow, text="Use these people",
                    command=self.set_shot_subject).pack(side="left")
         ttk.Button(srow, text="Use them and redraw",
                    command=self.set_shot_subject_and_redraw).pack(side="left", padx=6)
-        ttk.Label(right, foreground="#666", wraplength=380, justify="left",
-                  text="Pick everyone visible - Ctrl-click for more than one. The first "
-                       "one picked holds the locked face; the rest are described in the "
-                       "prompt. Only one face can be locked, so two or more people means "
-                       "a wider shot, where that does not show."
-                  ).pack(anchor="w", pady=(4, 0))
+        ttk.Button(srow, text="Clear",
+                   command=self.clear_shot_subject).pack(side="left")
 
-        ovr = ttk.LabelFrame(right, text="Describe this shot yourself", padding=8)
-        ovr.pack(fill="x", pady=(8, 0))
-        self.shot_text_box = tk.Text(ovr, height=3, wrap="word", font=("Segoe UI", 9))
-        self.shot_text_box.pack(fill="x")
-        ttk.Label(ovr, foreground="#666", wraplength=360, justify="left",
-                  text="Anything typed here replaces the AI's description for this "
-                       "shot and is kept when the storyboard is planned again. "
-                       "Empty it to hand the shot back to the AI."
-                  ).pack(anchor="w", pady=(4, 0))
-        orow = ttk.Frame(ovr)
-        orow.pack(fill="x", pady=(6, 0))
-        ttk.Button(orow, text="Save this shot",
-                   command=self.save_shot_text).pack(side="left")
-        ttk.Button(orow, text="Save and redraw",
-                   command=self.save_shot_text_and_redraw).pack(side="left", padx=6)
-
-        self.v_board_caption = tk.StringVar(value="")
-        ttk.Label(right, textvariable=self.v_board_caption, wraplength=380,
-                  justify="left", foreground="#333").pack(anchor="w", pady=(6, 0))
         panes.add(right, weight=2)
         self._board_photo = None
 
@@ -541,12 +548,12 @@ class App(ttk.Frame):
         if not sel:
             return
         index = int(sel[0])
-        self._board_photo = load_photo(self._drawn_shots().get(index, ""), 380, 430)
+        self._board_photo = load_photo(self._drawn_shots().get(index, ""), 330, 300)
         self.board_canvas.delete("all")
         if self._board_photo:
-            self.board_canvas.create_image(190, 215, image=self._board_photo)
+            self.board_canvas.create_image(165, 150, image=self._board_photo)
         else:
-            self.board_canvas.create_text(190, 215, fill="#8a8f99", text="not drawn yet")
+            self.board_canvas.create_text(165, 150, fill="#8a8f99", text="not drawn yet")
         if index < len(self.cues):
             cue = self.cues[index]
             shot = (self.project.get("shots") or {}).get(str(index)) or {}
@@ -625,6 +632,28 @@ class App(ttk.Frame):
         self.set_status("Shot %d: %s%s." % (
             index + 1, who,
             (" with " + ", ".join(picked[1:])) if len(picked) > 1 else " alone"))
+        return True
+
+    def clear_shot_subject(self):
+        """Hand the choice of who is in this shot back to the AI."""
+        sel = self.board_tree.selection()
+        if not sel:
+            messagebox.showinfo(APP, "Pick a shot in the list first.")
+            return False
+        index = int(sel[0])
+        shot = (self.project.get("shots") or {}).get(str(index))
+        if not shot:
+            return False
+        had = bool(shot.get("cast_override") or shot.get("subject_override"))
+        shot.pop("cast_override", None)
+        shot.pop("subject_override", None)
+        self.dirty = True
+        self._refresh_board()
+        self.board_tree.selection_set(sel[0])
+        self.board_tree.see(sel[0])
+        self.set_status("Shot %d: %s" % (
+            index + 1, "back to whoever the AI puts in it." if had
+            else "nothing was pinned on it."))
         return True
 
     def set_shot_subject_and_redraw(self):

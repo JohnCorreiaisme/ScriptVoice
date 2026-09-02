@@ -290,6 +290,12 @@ class App(ttk.Frame):
         self.v_seed = tk.StringVar()
         ttk.Entry(vbox, textvariable=self.v_seed, width=12).grid(
             row=3, column=1, sticky="w", padx=4, pady=(4, 0))
+        ttk.Label(vbox, text="Voice gender:").grid(row=3, column=2, sticky="e", pady=(4, 0))
+        self.v_voice_gender = tk.StringVar()
+        ttk.Combobox(vbox, textvariable=self.v_voice_gender, state="readonly", width=10,
+                     values=["Auto", "Male", "Female"]).grid(
+                         row=3, column=3, sticky="w", padx=4, pady=(4, 0))
+
         ttk.Label(vbox, text="Windows voice:").grid(row=4, column=0, sticky="w", pady=(8, 0))
         self.v_sys_voice = tk.StringVar()
         self.cb_sys_voice = ttk.Combobox(vbox, textvariable=self.v_sys_voice,
@@ -907,6 +913,11 @@ class App(ttk.Frame):
                 if typed != (actor.get("look_note") or ""):
                     actor["look_note"] = typed
                     self.dirty = True
+                want = self.v_voice_gender.get()
+                want = "" if want in ("", "Auto") else want
+                if want != (actor.get("voice_gender") or ""):
+                    actor["voice_gender"] = want
+                    self.dirty = True
                 ref = self.v_reference.get().strip()
                 if ref != (actor.get("reference_image") or ""):
                     actor["reference_image"] = ref
@@ -1363,6 +1374,7 @@ class App(ttk.Frame):
         self.v_seed.set(str(actor.get("seed", -1)))
         override = actor.get("system_voice") or {}
         assigned = system_voice(actor)
+        self.v_voice_gender.set(actor.get("voice_gender", "") or "Auto")
         self.v_sys_voice.set(override.get("voice", ""))
         self.v_sys_rate.set(str(override.get("rate", assigned.get("rate", 0))))
         self.v_sys_pitch.set(str(override.get("pitch", assigned.get("pitch", 0))))

@@ -36,18 +36,28 @@ LIST = ("Add-Type -AssemblyName System.Speech; "
 
 # The casting step writes a vocal range for every character. Two SAPI voices
 # can't act, but they can at least be the right register.
+# Stems, not whole words: models write "Sopranist" and "baritonal" as often as
+# the plain term, and a missed match silently casts the wrong voice. Longer
+# stems come first, because "countertenor" contains "tenor" and "contralto"
+# contains "alto".
 RANGES = [
-    ("bass", "Male", -15),
-    ("baritone", "Male", -8),
-    ("tenor", "Male", 10),
     ("countertenor", "Male", 16),
     ("contralto", "Female", -18),
-    ("alto", "Female", -10),
+    ("bariton", "Male", -8),
     ("mezzo", "Female", 0),
-    ("soprano", "Female", 14),
+    ("sopran", "Female", 14),
+    ("tenor", "Male", 10),
+    ("bass", "Male", -15),
+    ("alto", "Female", -10),
 ]
-GENDER_WORDS = [("Female", ("female", "woman", "feminine", "she ")),
-                ("Male", ("male", "man", "masculine", "he "))]
+# Descriptions rarely name a vocal range. These are the words writers actually
+# use, and without them a "deep, authoritative" man drew the female voice.
+GENDER_WORDS = [
+    ("Female", ("female", "woman", "feminine", "she ", "girlish", "airy",
+                "lilting", "silvery", "breathy high")),
+    ("Male", ("male", "man", "masculine", "he ", "deep", "gravel", "gruff",
+              "booming", "rumbling", "low and", "boyish")),
+]
 
 
 class SpeechError(RuntimeError):
@@ -169,7 +179,7 @@ def stable_seed(*parts):
     return int(hashlib.sha1(blob).hexdigest()[:8], 16) % (2 ** 31 - 1)
 
 
-def assign_voice(seed, voice_list=None, hint=""):
+def assign_voice(seed, voice_list=None, hint="", gender=""):
     """Pick a repeatable voice, speed and pitch for one character.
 
     `hint` is the character's written voice description. If it names a vocal
@@ -184,6 +194,9 @@ def assign_voice(seed, voice_list=None, hint=""):
     seed = abs(int(seed))
 
     wanted_gender, base_pitch = _range_of(hint)
+    chosen = str(gender or "").strip().capitalize()
+    if chosen in ("Male", "Female"):
+        wanted_gender = chosen          # the user's choice outranks the words
     pool = [v for v in table if v["gender"] == wanted_gender] if wanted_gender else []
     if not pool:
         pool = table
@@ -220,11 +233,16 @@ def _pace_of(hint, seed, n):
     return (seed // (n * 7)) % 3 - 1            # -1..1: audible, never a gabble
 
 
+def gender_of(hint):
+    """The gender a written voice description implies, or "" for none."""
+    return _range_of(hint)[0] or ""
+
+
 def _range_of(hint):
     """(gender, base pitch) implied by a written voice description."""
     low = " %s " % str(hint or "").lower()
     for word, gender, pitch in RANGES:
-        if word in low:
+        if word in low:            # stems, so "Sopranist" matches "sopran"
             return gender, pitch
     for gender, words in GENDER_WORDS:
         if any(w in low for w in words):

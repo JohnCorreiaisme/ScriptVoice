@@ -44,7 +44,8 @@ def system_voice(character):
     if seed < 0:
         seed = speech.stable_seed(character.get("name", ""),
                                   character.get("voice_type", ""))
-    return speech.assign_voice(seed, hint=character.get("voice_type", ""))
+    return speech.assign_voice(seed, hint=character.get("voice_type", ""),
+                               gender=character.get("voice_gender", ""))
 
 
 class RenderJob(Worker):

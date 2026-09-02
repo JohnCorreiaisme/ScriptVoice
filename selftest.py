@@ -1523,6 +1523,48 @@ def suite(sv, check):
           all(wp(pr, "a person img").startswith("a person img, ")
               for _, pr in sv.casting.turnaround_prompts(pre_map["VICTOR"])))
 
+    # ------------------------------------------------ casting the right voice
+    check.section("[5n] voice gender: inferred, and overridable")
+    S = sv.speech
+    two = [{"name": "Microsoft David Desktop", "gender": "Male"},
+           {"name": "Microsoft Zira Desktop", "gender": "Female"}]
+    check("a named range still decides the gender",
+          S._range_of("warm dry American alto")[0] == "Female")
+    check("a stem matches, so Sopranist is not missed",
+          S._range_of("Sopranist")[0] == "Female", str(S._range_of("Sopranist")))
+    check("countertenor is not read as tenor",
+          S._range_of("countertenor") == ("Male", 16), str(S._range_of("countertenor")))
+    check("contralto is not read as alto",
+          S._range_of("contralto") == ("Female", -18), str(S._range_of("contralto")))
+    check("'deep' now implies male - the surfer was drawing the female voice",
+          S._range_of("Deep, authoritative")[0] == "Male")
+    check("a description with nothing in it implies nothing",
+          S._range_of("")[0] is None)
+
+    dane = {"name": "OTIS", "voice_type": "Deep, authoritative", "seed": 932377303}
+    auto = S.assign_voice(dane["seed"], two, hint=dane["voice_type"])
+    check("inference alone now casts him male", auto["voice"] == "Microsoft David Desktop",
+          str(auto["voice"]))
+    forced_f = S.assign_voice(dane["seed"], two, hint=dane["voice_type"], gender="Female")
+    check("an explicit choice overrides the description",
+          forced_f["voice"] == "Microsoft Zira Desktop", str(forced_f["voice"]))
+    forced_m = S.assign_voice(dane["seed"], two, hint="Soprano", gender="Male")
+    check("and overrides it in the other direction too",
+          forced_m["voice"] == "Microsoft David Desktop", str(forced_m["voice"]))
+    check("a blank choice falls back to the description",
+          S.assign_voice(dane["seed"], two, hint="Soprano", gender="")["voice"]
+          == "Microsoft Zira Desktop")
+    check("a nonsense choice is ignored rather than emptying the pool",
+          S.assign_voice(dane["seed"], two, hint="Soprano", gender="banana")["voice"]
+          == "Microsoft Zira Desktop")
+    check("the choice is stable, not re-rolled each call",
+          S.assign_voice(dane["seed"], two, hint="", gender="Male")
+          == S.assign_voice(dane["seed"], two, hint="", gender="Male"))
+
+    ch = sv.project.new_character("OTIS")
+    check("a new character has no gender chosen, so nothing is forced",
+          ch["voice_gender"] == "")
+
     # --------------------------------------------------------- regeneration
     check.section("[6] the regenerate buttons")
     before_voice = dict(p["characters"]["MAYA"])

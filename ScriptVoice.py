@@ -218,18 +218,28 @@ LIST = ("Add-Type -AssemblyName System.Speech; "
 
 # The casting step writes a vocal range for every character. Two SAPI voices
 # can't act, but they can at least be the right register.
+# Stems, not whole words: models write "Sopranist" and "baritonal" as often as
+# the plain term, and a missed match silently casts the wrong voice. Longer
+# stems come first, because "countertenor" contains "tenor" and "contralto"
+# contains "alto".
 RANGES = [
-    ("bass", "Male", -15),
-    ("baritone", "Male", -8),
-    ("tenor", "Male", 10),
     ("countertenor", "Male", 16),
     ("contralto", "Female", -18),
-    ("alto", "Female", -10),
+    ("bariton", "Male", -8),
     ("mezzo", "Female", 0),
-    ("soprano", "Female", 14),
+    ("sopran", "Female", 14),
+    ("tenor", "Male", 10),
+    ("bass", "Male", -15),
+    ("alto", "Female", -10),
 ]
-GENDER_WORDS = [("Female", ("female", "woman", "feminine", "she ")),
-                ("Male", ("male", "man", "masculine", "he "))]
+# Descriptions rarely name a vocal range. These are the words writers actually
+# use, and without them a "deep, authoritative" man drew the female voice.
+GENDER_WORDS = [
+    ("Female", ("female", "woman", "feminine", "she ", "girlish", "airy",
+                "lilting", "silvery", "breathy high")),
+    ("Male", ("male", "man", "masculine", "he ", "deep", "gravel", "gruff",
+              "booming", "rumbling", "low and", "boyish")),
+]
 
 
 class SpeechError(RuntimeError):
@@ -351,7 +361,7 @@ def stable_seed(*parts):
     return int(hashlib.sha1(blob).hexdigest()[:8], 16) % (2 ** 31 - 1)
 
 
-def assign_voice(seed, voice_list=None, hint=""):
+def assign_voice(seed, voice_list=None, hint="", gender=""):
     """Pick a repeatable voice, speed and pitch for one character.
 
     `hint` is the character's written voice description. If it names a vocal
@@ -366,6 +376,9 @@ def assign_voice(seed, voice_list=None, hint=""):
     seed = abs(int(seed))
 
     wanted_gender, base_pitch = _range_of(hint)
+    chosen = str(gender or "").strip().capitalize()
+    if chosen in ("Male", "Female"):
+        wanted_gender = chosen          # the user's choice outranks the words
     pool = [v for v in table if v["gender"] == wanted_gender] if wanted_gender else []
     if not pool:
         pool = table
@@ -402,11 +415,16 @@ def _pace_of(hint, seed, n):
     return (seed // (n * 7)) % 3 - 1            # -1..1: audible, never a gabble
 
 
+def gender_of(hint):
+    """The gender a written voice description implies, or "" for none."""
+    return _range_of(hint)[0] or ""
+
+
 def _range_of(hint):
     """(gender, base pitch) implied by a written voice description."""
     low = " %s " % str(hint or "").lower()
     for word, gender, pitch in RANGES:
-        if word in low:
+        if word in low:            # stems, so "Sopranist" matches "sopran"
             return gender, pitch
     for gender, words in GENDER_WORDS:
         if any(w in low for w in words):
@@ -2231,6 +2249,9 @@ def new_character(name):
         # A picture of this character to condition every render on. Yours if you
         # set one, otherwise the portrait the program drew.
         "reference_image": "",
+        # "", "Male" or "Female". Empty means work it out from the description;
+        # anything else is the user's decision and is never overridden.
+        "voice_gender": "",
         "look_note": "",        # words that go straight into the image prompt
         "one_line": "",
         "age_range": "",
@@ -3256,7 +3277,8 @@ def system_voice(character):
     if seed < 0:
         seed = speech.stable_seed(character.get("name", ""),
                                   character.get("voice_type", ""))
-    return speech.assign_voice(seed, hint=character.get("voice_type", ""))
+    return speech.assign_voice(seed, hint=character.get("voice_type", ""),
+                               gender=character.get("voice_gender", ""))
 
 
 class RenderJob(Worker):
@@ -4725,6 +4747,12 @@ class App(ttk.Frame):
         self.v_seed = tk.StringVar()
         ttk.Entry(vbox, textvariable=self.v_seed, width=12).grid(
             row=3, column=1, sticky="w", padx=4, pady=(4, 0))
+        ttk.Label(vbox, text="Voice gender:").grid(row=3, column=2, sticky="e", pady=(4, 0))
+        self.v_voice_gender = tk.StringVar()
+        ttk.Combobox(vbox, textvariable=self.v_voice_gender, state="readonly", width=10,
+                     values=["Auto", "Male", "Female"]).grid(
+                         row=3, column=3, sticky="w", padx=4, pady=(4, 0))
+
         ttk.Label(vbox, text="Windows voice:").grid(row=4, column=0, sticky="w", pady=(8, 0))
         self.v_sys_voice = tk.StringVar()
         self.cb_sys_voice = ttk.Combobox(vbox, textvariable=self.v_sys_voice,
@@ -5342,6 +5370,11 @@ class App(ttk.Frame):
                 if typed != (actor.get("look_note") or ""):
                     actor["look_note"] = typed
                     self.dirty = True
+                want = self.v_voice_gender.get()
+                want = "" if want in ("", "Auto") else want
+                if want != (actor.get("voice_gender") or ""):
+                    actor["voice_gender"] = want
+                    self.dirty = True
                 ref = self.v_reference.get().strip()
                 if ref != (actor.get("reference_image") or ""):
                     actor["reference_image"] = ref
@@ -5798,6 +5831,7 @@ class App(ttk.Frame):
         self.v_seed.set(str(actor.get("seed", -1)))
         override = actor.get("system_voice") or {}
         assigned = system_voice(actor)
+        self.v_voice_gender.set(actor.get("voice_gender", "") or "Auto")
         self.v_sys_voice.set(override.get("voice", ""))
         self.v_sys_rate.set(str(override.get("rate", assigned.get("rate", 0))))
         self.v_sys_pitch.set(str(override.get("pitch", assigned.get("pitch", 0))))

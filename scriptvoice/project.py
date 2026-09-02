@@ -197,6 +197,9 @@ def new_character(name):
         # A picture of this character to condition every render on. Yours if you
         # set one, otherwise the portrait the program drew.
         "reference_image": "",
+        # "", "Male" or "Female". Empty means work it out from the description;
+        # anything else is the user's decision and is never overridden.
+        "voice_gender": "",
         "look_note": "",        # words that go straight into the image prompt
         "one_line": "",
         "age_range": "",

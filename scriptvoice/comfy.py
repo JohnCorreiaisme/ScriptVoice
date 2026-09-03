@@ -190,7 +190,7 @@ class ComfyClient:
         """
         with open(path, "rb") as f:
             content = f.read()
-        # cast/HAROLD/portrait.png and cast/JEANNE/portrait.png share a basename,
+        # cast/ALPHA/portrait.png and cast/BETA/portrait.png share a basename,
         # so uploading by basename put every character on one file and every shot
         # was then conditioned on whoever went last. Name by content instead.
         stem, ext = os.path.splitext(os.path.basename(path))

@@ -69,7 +69,7 @@ picture workflow baked in at build time. Everything else in this repository is s
 against the flattened single file, so the two cannot drift apart. They use a stub ComfyUI and a
 stub OpenAI-compatible model server, so they need no GPU and no network.
 
-**Interface: 91 checks** (`python gui_selftest.py`) — drives the real Tk window: that a control
+**Interface: 101 checks** (`python gui_selftest.py`) — drives the real Tk window: that a control
 exists, is wired to the right handler, and is on screen at the default window size.
 
 **On real hardware** — Windows 11, RTX 3060 12 GB, ComfyUI with SDXL-Turbo, LM Studio serving
@@ -142,7 +142,7 @@ ScriptVoice.py      the whole program in one file (generated)
 build_single.py     flattens scriptvoice/ into it; refuses to build on a name collision
 run.py              runs the package
 selftest.py         813 checks, against both the package and the single file
-gui_selftest.py     91 widget checks against the real window
+gui_selftest.py     101 widget checks against the real window
 scriptvoice/        audio, comfy, casting, llm, movie, pipeline, project, render,
                     script_parser, speech, visuals, widgets, worker, gui
 workflows/          example API-format ComfyUI workflows

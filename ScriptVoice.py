@@ -2576,6 +2576,41 @@ def describe(workflow, target):
     return "%s  #%s  .%s" % (node.get("class_type", "?"), node_id, name)
 
 
+def workflow_makes(workflow):
+    """"audio", "image", or "" - what this workflow ends up saving.
+
+    A workflow's inputs do not say what it is for: a picture graph has a "text"
+    input like a speech graph does. What it saves at the end does say.
+    """
+    kinds = set()
+    for node in (workflow or {}).values():
+        cls = str((node or {}).get("class_type", ""))
+        low = cls.lower()
+        if not ("save" in low or "preview" in low):
+            continue
+        if "audio" in low:
+            kinds.add("audio")
+        elif "image" in low or "video" in low:
+            kinds.add("image")
+    if len(kinds) == 1:
+        return kinds.pop()
+    return "" if not kinds else "image"
+
+
+SLOT_MAKES = {"voice": "audio", "portrait": "image",
+              "turnaround": "image", "shot": "image"}
+
+
+def slot_mismatch(workflow, slot):
+    """A sentence naming the problem when a workflow cannot do a slot's job."""
+    wants = SLOT_MAKES.get(slot, "")
+    makes = workflow_makes(workflow)
+    if not wants or not makes or makes == wants:
+        return ""
+    return ("This workflow saves %s, but %s needs one that saves %s."
+            % (makes, WORKFLOW_SLOTS[slot]["label"], wants))
+
+
 def guess_mapping(workflow, slot="voice"):
     """Best-effort auto-detect of the inputs a slot needs."""
     rows = widget_inputs(workflow)
@@ -4600,6 +4635,7 @@ from tkinter import filedialog, messagebox, ttk
 # (flattened) from . import script_parser, speech, visuals
 # (flattened) from . import comfy as comfy_mod
 # (flattened) from .comfy import ComfyClient, ComfyError
+# (flattened) from .jobs import AUDIO, SlotRunner
 # (flattened) from .pipeline import CastJob, MovieJob, RegenerateJob, StoryboardJob
 # (flattened) from .render import RenderJob, system_voice
 # (flattened) from .widgets import ActorCard, ScrollFrame, SpinViewer, load_photo
@@ -4931,6 +4967,9 @@ class App(ttk.Frame):
         brow.grid(row=7, column=1, columnspan=2, sticky="w", padx=4, pady=(8, 0))
         ttk.Button(brow, text="Save", command=self.save_voice_details).pack(side="left")
         ttk.Button(brow, text="Hear it", command=self.preview_system_voice).pack(side="left", padx=6)
+        self.v_hear_note = tk.StringVar(value="")
+        ttk.Label(brow, textvariable=self.v_hear_note,
+                  foreground="#666").pack(side="left", padx=6)
 
         pbox = ttk.Frame(self.cast_side, padding=8)
         self.cast_side.add(pbox, text="  Advanced  ")
@@ -6288,29 +6327,67 @@ class App(ttk.Frame):
         self.dirty = True
 
     def preview_system_voice(self):
-        """Speak this actor's sample line with their Windows voice."""
+        """Speak this actor's sample line in the voice the film will use.
+
+        Whichever backend the project is set to - so this cannot preview a
+        Windows voice while the film is being made with a ComfyUI one.
+        """
         actor = (self.project.get("characters") or {}).get(self.selected_actor)
         if not actor:
             return
-        if not speech.available():
-            messagebox.showinfo(APP, "Windows speech isn't available on this machine.")
-            return
+        p = self._collect_ui_into_project()
+        backend = (p.get("options") or {}).get("voice_backend", "comfyui")
         self.save_voice_details()
         line = actor.get("sample_line") or "This is how I sound in this film."
         out = os.path.join(self.v_outdir.get() or self._default_outdir(), "_previews")
+        safe = actor["name"].replace(" ", "_")
 
-        def work():
+        if backend == "system":
+            if not speech.available():
+                messagebox.showinfo(APP, "Windows speech isn't available on this machine.")
+                return
+
+            def work():
+                try:
+                    v = system_voice(actor)
+                    path = speech.speak_to_wav(
+                        line, os.path.join(out, "%s_system.wav" % safe),
+                        voice=v["voice"], rate=v["rate"], pitch=v["pitch"])
+                    self.events.put({"kind": "played", "path": path})
+                except Exception as e:
+                    self.events.put({"kind": "failed", "message": str(e), "cancelled": False})
+
+            self.set_status("Speaking %s with the Windows voice..." % actor["name"])
+            threading.Thread(target=work, daemon=True).start()
+            return
+
+        cfg = proj.workflow_cfg(p, "voice")
+        if not cfg.get("path"):
+            messagebox.showinfo(
+                APP, "Voices come from a ComfyUI workflow, but no workflow is loaded "
+                     "for speaking.\n\nSet one on the Setup tab under What draws and "
+                     "speaks, or switch Where the voices come from back to Windows.")
+            self.nb.select(self.tab_wf)
+            return
+
+        def work_comfy():
             try:
-                v = system_voice(actor)
-                path = speech.speak_to_wav(
-                    line, os.path.join(out, "%s_system.wav" % actor["name"].replace(" ", "_")),
-                    voice=v["voice"], rate=v["rate"], pitch=v["pitch"])
+                client = ComfyClient(p["server"]["host"], p["server"]["port"], timeout=600)
+                runner = SlotRunner(client, p, "voice")
+                values = {"text": line, "seed": int(actor.get("seed", 0) or 0)}
+                if runner.has("voice"):
+                    if actor.get("voice_file") and os.path.exists(actor["voice_file"]):
+                        values["voice"] = runner.upload(actor["voice_file"])
+                    elif actor.get("voice_value"):
+                        values["voice"] = actor["voice_value"]
+                path = runner.run(values, os.path.join(out, "%s_comfy" % safe), AUDIO,
+                                  params=actor.get("params") or {})
                 self.events.put({"kind": "played", "path": path})
             except Exception as e:
                 self.events.put({"kind": "failed", "message": str(e), "cancelled": False})
 
-        self.set_status("Speaking %s..." % actor["name"])
-        threading.Thread(target=work, daemon=True).start()
+        self.set_status("Speaking %s through ComfyUI..." % actor["name"])
+        threading.Thread(target=work_comfy, daemon=True).start()
 
     def pick_voice_file(self):
         path = filedialog.askopenfilename(
@@ -6509,11 +6586,12 @@ class App(ttk.Frame):
     # -------------------------------------------------------------- workflows
 
     def pick_workflow(self):
+        slot = self._slot()
         path = filedialog.askopenfilename(
-            title="ComfyUI workflow (API format)",
+            title="Workflow for: %s" % proj.WORKFLOW_SLOTS[slot]["label"],
             filetypes=[("JSON", "*.json"), ("All files", "*.*")])
         if path:
-            self._load_workflow(self._slot(), path)
+            self._load_workflow(slot, path)
 
     def _load_workflow(self, slot, path, quiet=False):
         try:
@@ -6524,14 +6602,35 @@ class App(ttk.Frame):
             return
         self.workflows[slot] = wf
         cfg = self.project["workflows"].setdefault(slot, {"path": "", "mapping": {}})
+        changed = os.path.normcase(cfg.get("path") or "") != os.path.normcase(path)
         cfg["path"] = path
         self.v_wf_path.set(path)
-        if not (cfg.get("mapping") or {}):
+        if changed or not (cfg.get("mapping") or {}):
+            # A mapping names nodes inside the file it was made for ("6.text").
+            # Keeping it across a different file points it at nodes that are not
+            # there, and the slot then reads as ready while it cannot run.
             cfg["mapping"] = proj.guess_mapping(wf, slot)
         self._refresh_slot_tree()
         self._show_slot()
         self.dirty = True
-        if not quiet:
+        wrong_kind = proj.slot_mismatch(wf, slot)
+        if wrong_kind and not quiet:
+            messagebox.showwarning(
+                APP, "%s\n\nIf you meant it for a different job, pick that row on the "
+                     "Setup tab first and load it again." % wrong_kind)
+            self.set_status(wrong_kind)
+            return
+        missing = [k for k, _, req in proj.WORKFLOW_SLOTS[slot]["keys"]
+                   if req and not (cfg.get("mapping") or {}).get(k)]
+        if missing and not quiet:
+            messagebox.showwarning(
+                APP, "That workflow was loaded for %s, but it has no %s input.\n\n"
+                     "This job cannot run without one. If you meant it for a different "
+                     "job, pick that row first and load it again."
+                     % (proj.WORKFLOW_SLOTS[slot]["label"], " or ".join(missing)))
+            self.set_status("Loaded, but %s has no %s input."
+                            % (os.path.basename(path), " or ".join(missing)))
+        elif not quiet:
             self.set_status("Loaded %d-node workflow for %s."
                             % (len(wf), proj.WORKFLOW_SLOTS[slot]["label"]))
 

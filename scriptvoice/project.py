@@ -436,6 +436,41 @@ def describe(workflow, target):
     return "%s  #%s  .%s" % (node.get("class_type", "?"), node_id, name)
 
 
+def workflow_makes(workflow):
+    """"audio", "image", or "" - what this workflow ends up saving.
+
+    A workflow's inputs do not say what it is for: a picture graph has a "text"
+    input like a speech graph does. What it saves at the end does say.
+    """
+    kinds = set()
+    for node in (workflow or {}).values():
+        cls = str((node or {}).get("class_type", ""))
+        low = cls.lower()
+        if not ("save" in low or "preview" in low):
+            continue
+        if "audio" in low:
+            kinds.add("audio")
+        elif "image" in low or "video" in low:
+            kinds.add("image")
+    if len(kinds) == 1:
+        return kinds.pop()
+    return "" if not kinds else "image"
+
+
+SLOT_MAKES = {"voice": "audio", "portrait": "image",
+              "turnaround": "image", "shot": "image"}
+
+
+def slot_mismatch(workflow, slot):
+    """A sentence naming the problem when a workflow cannot do a slot's job."""
+    wants = SLOT_MAKES.get(slot, "")
+    makes = workflow_makes(workflow)
+    if not wants or not makes or makes == wants:
+        return ""
+    return ("This workflow saves %s, but %s needs one that saves %s."
+            % (makes, WORKFLOW_SLOTS[slot]["label"], wants))
+
+
 def guess_mapping(workflow, slot="voice"):
     """Best-effort auto-detect of the inputs a slot needs."""
     rows = widget_inputs(workflow)

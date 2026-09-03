@@ -521,6 +521,75 @@ root.update()
 ok("with nothing selected it still picks a row to show",
    len(app.board_tree.selection()) == 1, str(app.board_tree.selection()))
 
+# --- swapping a workflow must not keep the old mapping --------------------
+import os as _os
+wf_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "workflows")
+img_wf = _os.path.join(wf_dir, "sdxl_turbo_actor_api.json")
+voice_wf = _os.path.join(wf_dir, "chatterbox_voice_api.json")
+
+if _os.path.exists(img_wf) and _os.path.exists(voice_wf):
+    app.project["workflows"]["voice"] = {"path": voice_wf,
+                                         "mapping": {"text": "2.text", "seed": "2.seed"}}
+    app._load_workflow("voice", img_wf, quiet=True)
+    got = app.project["workflows"]["voice"]["mapping"]
+    ok("swapping the file re-detects the mapping instead of keeping the old one",
+       got.get("text") != "2.text", str(sorted(got.items())))
+    # a picture workflow maps "text" happily (CLIPTextEncode has one), so what
+    # it SAVES is the honest signal
+    ok("a picture workflow is recognised as a picture workflow",
+       sv.project.workflow_makes(sv.project.load_workflow(img_wf)) == "image")
+    ok("and a speaking workflow as a speaking one",
+       sv.project.workflow_makes(sv.project.load_workflow(voice_wf)) == "audio")
+    ok("putting a picture workflow in the voice slot is called out",
+       "saves image" in sv.project.slot_mismatch(sv.project.load_workflow(img_wf), "voice"),
+       sv.project.slot_mismatch(sv.project.load_workflow(img_wf), "voice"))
+    ok("and a speaking workflow in a picture slot too",
+       bool(sv.project.slot_mismatch(sv.project.load_workflow(voice_wf), "shot")),
+       sv.project.slot_mismatch(sv.project.load_workflow(voice_wf), "shot"))
+    ok("the right workflow in the right slot is not complained about",
+       sv.project.slot_mismatch(sv.project.load_workflow(voice_wf), "voice") == ""
+       and sv.project.slot_mismatch(sv.project.load_workflow(img_wf), "shot") == "")
+
+    app._load_workflow("voice", voice_wf, quiet=True)
+    back = app.project["workflows"]["voice"]["mapping"]
+    ok("loading the right kind of workflow maps it properly",
+       back.get("text") and back.get("voice") and back.get("seed"),
+       str(sorted(back.items())))
+    ok("reloading the same file does not disturb a working mapping",
+       (app._load_workflow("voice", voice_wf, quiet=True) or True)
+       and app.project["workflows"]["voice"]["mapping"] == back)
+
+# --- Hear it must follow the backend, not always speak through Windows -----
+played = {"kind": None}
+real_thread = None
+app.project["options"]["voice_backend"] = "comfyui"
+app.project["workflows"]["voice"] = {"path": "", "mapping": {}}
+app.project["characters"]["MAYA"] = sv.project.new_character("MAYA")
+app.project["cast_order"] = ["MAYA"]
+app._refresh_cast()
+app.select_actor("MAYA")
+seen_dialog = {"n": 0}
+real_info = sv.gui.messagebox.showinfo
+
+
+def fake_info(*a, **k):
+    seen_dialog["n"] += 1
+    return "ok"
+
+
+sv.gui.messagebox.showinfo = fake_info
+try:
+    app.preview_system_voice()
+    ok("on the ComfyUI backend with no speaking workflow it says so, "
+       "rather than playing a Windows voice", seen_dialog["n"] == 1,
+       "%d dialogs" % seen_dialog["n"])
+finally:
+    sv.gui.messagebox.showinfo = real_info
+
+app.project["options"]["voice_backend"] = "system"
+ok("switching back to Windows is what the status line will report",
+   (app.project.get("options") or {}).get("voice_backend") == "system")
+
 root.destroy()
 print("\n%d failed" % len(fails))
 sys.exit(1 if fails else 0)

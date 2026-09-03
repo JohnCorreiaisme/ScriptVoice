@@ -480,6 +480,47 @@ for i, box in ((0, app.look_text), (2, app.who_text)):
        "bottom %d vs %d" % (box.winfo_rooty() + box.winfo_height(),
                             root.winfo_rooty() + root.winfo_height()))
 
+# --- redrawing one shot must not throw you back to the first ---------------
+lines = []
+for i in range(40):
+    lines.append("%s: Line number %d." % (["MAYA", "RUBEN"][i % 2], i))
+app.project["script"] = chr(10).join(lines) + chr(10)
+app.script_text.delete("1.0", "end")
+app.script_text.insert("1.0", app.project["script"])
+app.scan_script()
+app.nb.select(app.tab_board)
+root.update()
+
+rows = app.board_tree.get_children()
+ok("the board has every line", len(rows) == 40, str(len(rows)))
+target = rows[30]
+app.board_tree.selection_set(target)
+app.board_tree.see(target)
+root.update()
+ok("a shot deep in the list can be selected",
+   app.board_tree.selection() == (target,), str(app.board_tree.selection()))
+
+# this is what a redraw does to the list
+app._refresh_board()
+root.update()
+ok("rebuilding the list keeps you on the same shot",
+   app.board_tree.selection() == (target,), str(app.board_tree.selection()))
+ok("and it is the row you were editing, not the first",
+   app.board_tree.selection() != (rows[0],), str(app.board_tree.selection()))
+
+# and the finished-job handler must not steal it back
+app._on_job_result({"job": "storyboard", "drawn": 1})
+root.update()
+ok("a finished redraw leaves the selection alone",
+   app.board_tree.selection() == (target,), str(app.board_tree.selection()))
+
+# a first full draw with nothing selected should still land somewhere useful
+app.board_tree.selection_remove(*app.board_tree.selection())
+app._on_job_result({"job": "storyboard", "drawn": 40})
+root.update()
+ok("with nothing selected it still picks a row to show",
+   len(app.board_tree.selection()) == 1, str(app.board_tree.selection()))
+
 root.destroy()
 print("\n%d failed" % len(fails))
 sys.exit(1 if fails else 0)

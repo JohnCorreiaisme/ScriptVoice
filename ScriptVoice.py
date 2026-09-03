@@ -5054,9 +5054,18 @@ class App(ttk.Frame):
         self._board_photo = None
 
     def _refresh_board(self):
-        """Fill the shot list from the script and whatever has been drawn."""
+        """Fill the shot list from the script and whatever has been drawn.
+
+        Rebuilding drops the selection and the scroll position, so both are put
+        back: redrawing one shot should leave you looking at that shot.
+        """
         if not hasattr(self, "board_tree"):
             return
+        keep = list(self.board_tree.selection())
+        try:
+            top = self.board_tree.yview()[0]
+        except Exception:
+            top = 0.0
         self.board_tree.delete(*self.board_tree.get_children())
         shots = self.project.get("shots") or {}
         drawn = self._drawn_shots()
@@ -5073,6 +5082,12 @@ class App(ttk.Frame):
                                            "drawn" if c.index in drawn else ""))
         self.v_board_info.set("%d lines | %d drawn" % (len(self.cues), len(drawn)))
         self.btn_board_movie.configure(state="normal" if drawn else "disabled")
+        still_there = [i for i in keep if self.board_tree.exists(i)]
+        if still_there:
+            self.board_tree.selection_set(still_there)
+            self.board_tree.focus(still_there[0])
+            self.board_tree.yview_moveto(top)
+            self.board_tree.see(still_there[0])
 
     def _drawn_shots(self):
         """{cue index: image path} from the shots manifest on disk."""
@@ -6642,6 +6657,7 @@ class App(ttk.Frame):
             self.set_status("Storyboard ready: %d shots drawn." % e.get("drawn", 0))
             children = self.board_tree.get_children()
             if children and not self.board_tree.selection():
+                # only on a first full draw - never steal the row being edited
                 self.board_tree.selection_set(children[0])
         elif job == "movie":
             if e.get("movie"):

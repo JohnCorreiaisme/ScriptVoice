@@ -1639,6 +1639,59 @@ def suite(sv, check):
           len(rr.uploaded) == 1, str(rr.uploaded))
     check("and it is the first person's", subj == "MIKE" and ref == port, "%s %s" % (subj, ref))
 
+    # ------------------------------------------- reopening the last project
+    check.section("[5p] the project you had last")
+    saved_settings = sv.project.SETTINGS_PATH
+    sv.project.SETTINGS_PATH = os.path.join(work, "settings.json")
+    try:
+        check("no settings file yet means nothing to reopen",
+              sv.project.last_project() == "", sv.project.last_project())
+        check("reading a missing settings file gives a dict, not a crash",
+              sv.project.load_settings() == {})
+
+        proj_file = os.path.join(work, "remembered.svproj")
+        sv.project.save(sv.project.new_project(), proj_file)
+        sv.project.remember_project(proj_file)
+        check("the project just opened is remembered",
+              os.path.normcase(sv.project.last_project())
+              == os.path.normcase(proj_file), sv.project.last_project())
+        check("it is stored as an absolute path, so the working directory cannot break it",
+              os.path.isabs(sv.project.load_settings().get("last_project", "")))
+
+        os.remove(proj_file)
+        check("a project that has been deleted is not offered",
+              sv.project.last_project() == "", sv.project.last_project())
+
+        sv.project.save(sv.project.new_project(), proj_file)
+        sv.project.save_settings({"reopen_last": False})
+        check("turning the preference off stops it reopening",
+              sv.project.last_project() == "", sv.project.last_project())
+        sv.project.save_settings({"reopen_last": True})
+        check("turning it back on restores the same project",
+              os.path.normcase(sv.project.last_project())
+              == os.path.normcase(proj_file))
+        check("the two preferences live side by side",
+              sorted(sv.project.load_settings()) == ["last_project", "reopen_last"],
+              str(sorted(sv.project.load_settings())))
+
+        io.open(sv.project.SETTINGS_PATH, "w", encoding="utf-8").write("{not json")
+        check("a corrupt settings file is ignored rather than fatal",
+              sv.project.load_settings() == {} and sv.project.last_project() == "")
+        check("and writing over it repairs it",
+              sv.project.remember_project(proj_file)
+              and os.path.normcase(sv.project.last_project())
+              == os.path.normcase(proj_file))
+
+        sv.project.SETTINGS_PATH = os.path.join(work, "nodir", "deep", "settings.json")
+        check("an unwritable settings path fails quietly, it does not raise",
+              sv.project.save_settings({"last_project": "x"}) is False)
+    finally:
+        sv.project.SETTINGS_PATH = saved_settings
+
+    check("the real settings file sits with the user's files, not the program",
+          sv.project.SETTINGS_PATH.startswith(os.path.expanduser("~")),
+          sv.project.SETTINGS_PATH)
+
     # --------------------------------------------------------- regeneration
     check.section("[6] the regenerate buttons")
     before_voice = dict(p["characters"]["MAYA"])

@@ -15,7 +15,7 @@ import ScriptVoice as sv
 
 root = tk.Tk()
 root.withdraw()
-app = sv.App(root)
+app = sv.App(root, reopen=False)   # never load the user's real project
 root.update_idletasks()
 
 fails = []

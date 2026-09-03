@@ -2298,6 +2298,47 @@ def new_project():
     }
 
 
+# Remembered between runs, beside the user's own files rather than beside the
+# program - so a copied ScriptVoice.py still finds it, and a read-only install
+# still works.
+SETTINGS_PATH = os.path.join(os.path.expanduser("~"), ".scriptvoice.json")
+
+
+def load_settings():
+    """The handful of preferences that outlive a project. Never raises."""
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_settings(values):
+    """Write the preferences back. A failure here must never stop the program."""
+    try:
+        data = load_settings()
+        data.update(values or {})
+        with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+def remember_project(path):
+    """Note which project was open, so the next run can pick it up."""
+    return save_settings({"last_project": os.path.abspath(path) if path else ""})
+
+
+def last_project():
+    """The project to reopen at startup, or "" - never a path that has gone."""
+    if not load_settings().get("reopen_last", True):
+        return ""
+    path = load_settings().get("last_project") or ""
+    return path if path and os.path.exists(path) else ""
+
+
 def alias_map(project):
     """{other name: real name} for every character that has absorbed another.
 
@@ -4587,7 +4628,7 @@ MAYA: We don't have a minute.
 
 
 class App(ttk.Frame):
-    def __init__(self, master):
+    def __init__(self, master, reopen=True):
         ttk.Frame.__init__(self, master, padding=0)
         self.pack(fill="both", expand=True)
         self.master.title(APP)
@@ -4614,6 +4655,9 @@ class App(ttk.Frame):
         self._load_project_into_ui()
         self.after(120, self._drain_events)
         self.master.protocol("WM_DELETE_WINDOW", self._on_close)
+        if reopen:
+            # after the window exists, so a failure shows in the status bar
+            self.after(80, self._reopen_last_project)
 
     # ------------------------------------------------------------------ chrome
 
@@ -4672,6 +4716,29 @@ class App(ttk.Frame):
         ttk.Label(bar, textvariable=self.status, anchor="w").pack(side="left", fill="x", expand=True)
         self.conn = tk.StringVar(value="ComfyUI: not checked   |   model: not checked")
         ttk.Label(bar, textvariable=self.conn, anchor="e").pack(side="right")
+
+    def _reopen_last_project(self):
+        """Load the project that was open last time, if it is still there.
+
+        Never fatal: a project that has moved, or one this version cannot read,
+        leaves you on the sample rather than on an error at startup.
+        """
+        path = proj.last_project()
+        if not path:
+            return
+        try:
+            self.project = proj.load(path)
+        except Exception as e:
+            self.set_status("Couldn't reopen %s: %s" % (os.path.basename(path), e))
+            return
+        self.project_path = path
+        proj.remember_project(path)
+        adopted = proj.adopt_default_workflows(self.project)
+        self._load_project_into_ui()
+        self.dirty = bool(adopted)
+        self._retitle()
+        self.set_status("Opened %s (the project you had last)."
+                        % os.path.basename(path))
 
     # ------------------------------------------------------------ premise tab
 
@@ -5320,7 +5387,18 @@ class App(ttk.Frame):
         ttk.Checkbutton(orow, text="Re-use anything that hasn't changed",
                         variable=self.v_reuse).pack(side="left", padx=12)
 
-        gb = ttk.LabelFrame(basic, text="5. Graphics card", padding=10)
+        sb = ttk.LabelFrame(basic, text="5. When the program starts", padding=10)
+        sb.pack(fill="x", pady=(10, 0))
+        self.v_reopen = tk.BooleanVar(value=proj.load_settings().get("reopen_last", True))
+        ttk.Checkbutton(sb, text="Open the project I had last",
+                        variable=self.v_reopen,
+                        command=lambda: proj.save_settings(
+                            {"reopen_last": bool(self.v_reopen.get())})).pack(side="left")
+        self.v_reopen_note = tk.StringVar(value="")
+        ttk.Label(sb, textvariable=self.v_reopen_note,
+                  foreground="#666").pack(side="left", padx=10)
+
+        gb = ttk.LabelFrame(basic, text="6. Graphics card", padding=10)
         gb.pack(fill="x", pady=(10, 0))
         self.v_free_gpu = tk.BooleanVar(value=False)
         ttk.Checkbutton(gb, text="Free the GPU between steps",
@@ -5714,6 +5792,7 @@ class App(ttk.Frame):
         if not self.project_path:
             return self.save_project_as()
         proj.save(self._collect_ui_into_project(), self.project_path)
+        proj.remember_project(self.project_path)
         self.dirty = False
         self._retitle()
         self.set_status("Saved %s" % os.path.basename(self.project_path))
@@ -6880,7 +6959,7 @@ def main():
     except tk.TclError:
         pass
     fit_rows_to_font(root)
-    App(root)
+    App(root, reopen=True)
     root.mainloop()
 
 

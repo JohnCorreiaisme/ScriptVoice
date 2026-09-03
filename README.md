@@ -45,6 +45,10 @@ Six tabs, in the order you'd actually work:
    steps. *What draws and speaks*: one visible row per job saying which workflow is
    loaded and whether it is ready. *Advanced*: every input a workflow exposes.
 
+It opens the project you had last. That preference, and which project it was, live in
+`~/.scriptvoice.json` - beside your files rather than beside the program, so a copied
+`ScriptVoice.py` still finds it. Turn it off under *When the program starts*.
+
 Two ways to run it, same program:
 
 ```bash
@@ -61,7 +65,7 @@ picture workflow baked in at build time. Everything else in this repository is s
 
 ## What has actually been tested
 
-**Automated: 789 checks** (`python selftest.py`) — run twice, once against the package and once
+**Automated: 813 checks** (`python selftest.py`) — run twice, once against the package and once
 against the flattened single file, so the two cannot drift apart. They use a stub ComfyUI and a
 stub OpenAI-compatible model server, so they need no GPU and no network.
 
@@ -137,7 +141,7 @@ Nothing else. No accounts, no keys, no network calls beyond `127.0.0.1`.
 ScriptVoice.py      the whole program in one file (generated)
 build_single.py     flattens scriptvoice/ into it; refuses to build on a name collision
 run.py              runs the package
-selftest.py         789 checks, against both the package and the single file
+selftest.py         813 checks, against both the package and the single file
 gui_selftest.py     91 widget checks against the real window
 scriptvoice/        audio, comfy, casting, llm, movie, pipeline, project, render,
                     script_parser, speech, visuals, widgets, worker, gui

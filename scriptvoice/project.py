@@ -158,6 +158,47 @@ def new_project():
     }
 
 
+# Remembered between runs, beside the user's own files rather than beside the
+# program - so a copied ScriptVoice.py still finds it, and a read-only install
+# still works.
+SETTINGS_PATH = os.path.join(os.path.expanduser("~"), ".scriptvoice.json")
+
+
+def load_settings():
+    """The handful of preferences that outlive a project. Never raises."""
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_settings(values):
+    """Write the preferences back. A failure here must never stop the program."""
+    try:
+        data = load_settings()
+        data.update(values or {})
+        with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+def remember_project(path):
+    """Note which project was open, so the next run can pick it up."""
+    return save_settings({"last_project": os.path.abspath(path) if path else ""})
+
+
+def last_project():
+    """The project to reopen at startup, or "" - never a path that has gone."""
+    if not load_settings().get("reopen_last", True):
+        return ""
+    path = load_settings().get("last_project") or ""
+    return path if path and os.path.exists(path) else ""
+
+
 def alias_map(project):
     """{other name: real name} for every character that has absorbed another.
 

@@ -77,12 +77,19 @@ Qwen2.5-Coder-7B:
 
 | | measured |
 |---|---|
-| One portrait | ~4 s |
+| Casting pass (Qwen2.5-Coder-7B) | ~20 s |
+| One portrait, SDXL-Turbo | ~4 s |
 | Portrait + 8-frame turnaround | ~30 s |
-| Casting pass (7B) | ~20 s |
-| 202 storyboard shots | ~14 min, 118 MB |
-| 202 dialogue clips (Windows SAPI) | 51 s |
-| Final cut | 18 min film, 1280×720, 44.8 MB |
+| One shot, SDXL-Turbo, no face locking | ~4 s |
+| One shot, SDXL base + PhotoMaker, 768x768 | ~16 s |
+| One line, Chatterbox voice cloning | ~5.7 s |
+| One line, Windows SAPI | ~0.25 s |
+| 202 storyboard shots, Turbo | ~14 min, 118 MB |
+| Final cut | 18 min film, 1280x720, 44.8 MB |
+
+For a 202-line script that is roughly 20 minutes of speech with cloned voices, and
+about an hour of drawing with faces locked - against 51 seconds and 14 minutes for the
+fast, worse-looking versions of each.
 
 The output `.mp4` is decoded and correlated against its source frames as part of testing —
 0.985–0.992 on a real render — because an earlier version produced eighteen minutes of static
@@ -91,25 +98,26 @@ while every metadata check passed.
 ### Known limitations
 
 - **One machine, one script.** Windows 11 + Python 3.10 + LM Studio. Nothing else is tested.
-- **No neural voices.** The ComfyUI install it was built against has no TTS nodes, so speech is
-  Windows SAPI. It sounds like Windows SAPI. The ComfyUI voice path exists but is unexercised.
+- **Good voices and locked faces are both opt-in.** Out of the box you get Windows SAPI speech
+  and a plain SDXL-Turbo picture workflow, because those need nothing installed. The good paths
+  need models you fetch yourself - see Requirements.
 - **No ffmpeg.** Muxing goes through PyAV. `pip install av`.
 - **12 GB is tight.** ComfyUI and a language model do not fit at once. *Free the GPU between
   steps* on the Setup tab evicts each before the other runs, at ~10 s per handover.
-- **SDXL-Turbo takes prompt adherence only so far.** A better checkpoint would help more than any
-  amount of prompt engineering.
+- **Say the number of people and the framing** in a shot with more than one character. Names
+  alone do not tell a diffusion model how many bodies to draw - it will often draw one.
+- **PhotoMaker locks one face per shot.** Two reference images blend into a single invented
+  person rather than producing two. Everyone else in frame is described in words, which is
+  enough at the width a two-hander is shot at.
 
 ### Not done
 
-- **Character consistency needs a workflow that can use it.** Every shot is now conditioned on
-  the character's reference face - yours if you set one, otherwise the drawn portrait - and the
-  seed follows the face in frame rather than the speaker. But that only bites if your shot
-  workflow has a reference-image input (IPAdapter, InstantID, PuLID). With a plain text-to-image
-  graph the app says so in the log and characters still drift.
 - **The turnaround is 8 separate renders, not a real 3D spin.** Angles are prompted, not modelled.
-- **The film is stills cut against audio.** No motion, no camera moves.
+- **The film is stills cut against audio.** No motion, no camera moves. A `motion` workflow slot
+  driving a local video model (LTX-2 runs on 12 GB at FP8) would be the next real step.
 - **No continuity between shots** beyond the scene heading — no eyelines, no consistent geography.
-- Voice cloning, second-pass shot refinement, and subtitles are all unimplemented.
+- **No lip sync.** The voices are recorded separately from the pictures.
+- Second-pass shot refinement and subtitles are unimplemented.
 
 ---
 
@@ -123,6 +131,12 @@ while every metadata check passed.
 - `pip install pillow` — image previews (optional, degrades to Tk's own PNG/GIF support)
 - `pip install av` — writing the `.mp4` (optional; without it you get the stills, the audio and
   an EDL)
+
+**For voices that do not sound like Windows** install the
+[TTS Audio Suite](https://github.com/diodiogod/TTS-Audio-Suite) node pack through ComfyUI's
+Manager, then load `workflows/chatterbox_voice_api.json` into the *Voice* slot and set
+*Where the voices come from* to the ComfyUI workflow. It ships 17 reference voices, so nothing
+needs recording, and each character clones one. Models download themselves on first use.
 
 **To keep a character's face across shots** you need a workflow with a reference-image input.
 `workflows/sdxl_photomaker_reference_api.json` uses the PhotoMaker nodes ComfyUI already ships,
